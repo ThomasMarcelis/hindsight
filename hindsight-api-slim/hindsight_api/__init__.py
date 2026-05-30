@@ -54,3 +54,6 @@ __all__ = [
     "LLMConfig",
 ]
 __version__ = "0.7.2"
+__distribution__ = "jd-hindsight"
+__upstream_repository__ = "vectorize-io/hindsight"
+__upstream_version__ = "0.7.2"

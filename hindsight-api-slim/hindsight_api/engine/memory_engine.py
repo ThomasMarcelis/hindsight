@@ -630,14 +630,17 @@ class MemoryEngine(MemoryEngineInterface):
         retain_llm_api_key: str | None = None,
         retain_llm_model: str | None = None,
         retain_llm_base_url: str | None = None,
+        retain_llm_reasoning_effort: str | None = None,
         reflect_llm_provider: str | None = None,
         reflect_llm_api_key: str | None = None,
         reflect_llm_model: str | None = None,
         reflect_llm_base_url: str | None = None,
+        reflect_llm_reasoning_effort: str | None = None,
         consolidation_llm_provider: str | None = None,
         consolidation_llm_api_key: str | None = None,
         consolidation_llm_model: str | None = None,
         consolidation_llm_base_url: str | None = None,
+        consolidation_llm_reasoning_effort: str | None = None,
         embeddings: Embeddings | None = None,
         cross_encoder: CrossEncoderModel | None = None,
         query_analyzer: QueryAnalyzer | None = None,
@@ -669,14 +672,17 @@ class MemoryEngine(MemoryEngineInterface):
             retain_llm_api_key: API key for retain LLM. Falls back to memory_llm_api_key.
             retain_llm_model: Model for retain operations. Falls back to memory_llm_model.
             retain_llm_base_url: Base URL for retain LLM. Falls back to memory_llm_base_url.
+            retain_llm_reasoning_effort: Reasoning effort for retain LLM. Falls back to global reasoning effort.
             reflect_llm_provider: LLM provider for reflect operations. Falls back to memory_llm_provider.
             reflect_llm_api_key: API key for reflect LLM. Falls back to memory_llm_api_key.
             reflect_llm_model: Model for reflect operations. Falls back to memory_llm_model.
             reflect_llm_base_url: Base URL for reflect LLM. Falls back to memory_llm_base_url.
+            reflect_llm_reasoning_effort: Reasoning effort for reflect LLM. Falls back to global reasoning effort.
             consolidation_llm_provider: LLM provider for consolidation operations. Falls back to memory_llm_provider.
             consolidation_llm_api_key: API key for consolidation LLM. Falls back to memory_llm_api_key.
             consolidation_llm_model: Model for consolidation operations. Falls back to memory_llm_model.
             consolidation_llm_base_url: Base URL for consolidation LLM. Falls back to memory_llm_base_url.
+            consolidation_llm_reasoning_effort: Reasoning effort for consolidation LLM. Falls back to global reasoning effort.
             embeddings: Embeddings implementation. If not provided, created from env vars.
             cross_encoder: Cross-encoder model. If not provided, created from env vars.
             query_analyzer: Query analyzer implementation. If not provided, uses DateparserQueryAnalyzer.
@@ -807,6 +813,9 @@ class MemoryEngine(MemoryEngineInterface):
         retain_api_key = retain_llm_api_key or config.retain_llm_api_key or memory_llm_api_key
         retain_model = retain_llm_model or config.retain_llm_model or memory_llm_model
         retain_base_url = retain_llm_base_url or config.retain_llm_base_url or memory_llm_base_url
+        retain_reasoning_effort = (
+            retain_llm_reasoning_effort or config.retain_llm_reasoning_effort or config.llm_reasoning_effort
+        )
         # Apply provider-specific base URL defaults for retain
         if retain_base_url is None:
             if retain_provider.lower() == "groq":
@@ -823,7 +832,7 @@ class MemoryEngine(MemoryEngineInterface):
             api_key=retain_api_key,
             base_url=retain_base_url,
             model=retain_model,
-            reasoning_effort=config.llm_reasoning_effort,
+            reasoning_effort=retain_reasoning_effort,
             extra_body=config.llm_extra_body,
             default_headers=config.llm_default_headers,
             litellmrouter_config=config.retain_llm_litellmrouter_config or config.llm_litellmrouter_config,
@@ -834,6 +843,9 @@ class MemoryEngine(MemoryEngineInterface):
         reflect_api_key = reflect_llm_api_key or config.reflect_llm_api_key or memory_llm_api_key
         reflect_model = reflect_llm_model or config.reflect_llm_model or memory_llm_model
         reflect_base_url = reflect_llm_base_url or config.reflect_llm_base_url or memory_llm_base_url
+        reflect_reasoning_effort = (
+            reflect_llm_reasoning_effort or config.reflect_llm_reasoning_effort or config.llm_reasoning_effort
+        )
         # Apply provider-specific base URL defaults for reflect
         if reflect_base_url is None:
             if reflect_provider.lower() == "groq":
@@ -850,7 +862,7 @@ class MemoryEngine(MemoryEngineInterface):
             api_key=reflect_api_key,
             base_url=reflect_base_url,
             model=reflect_model,
-            reasoning_effort=config.llm_reasoning_effort,
+            reasoning_effort=reflect_reasoning_effort,
             extra_body=config.llm_extra_body,
             default_headers=config.llm_default_headers,
             litellmrouter_config=config.reflect_llm_litellmrouter_config or config.llm_litellmrouter_config,
@@ -861,6 +873,11 @@ class MemoryEngine(MemoryEngineInterface):
         consolidation_api_key = consolidation_llm_api_key or config.consolidation_llm_api_key or memory_llm_api_key
         consolidation_model = consolidation_llm_model or config.consolidation_llm_model or memory_llm_model
         consolidation_base_url = consolidation_llm_base_url or config.consolidation_llm_base_url or memory_llm_base_url
+        consolidation_reasoning_effort = (
+            consolidation_llm_reasoning_effort
+            or config.consolidation_llm_reasoning_effort
+            or config.llm_reasoning_effort
+        )
         # Apply provider-specific base URL defaults for consolidation
         if consolidation_base_url is None:
             if consolidation_provider.lower() == "groq":
@@ -877,7 +894,7 @@ class MemoryEngine(MemoryEngineInterface):
             api_key=consolidation_api_key,
             base_url=consolidation_base_url,
             model=consolidation_model,
-            reasoning_effort=config.llm_reasoning_effort,
+            reasoning_effort=consolidation_reasoning_effort,
             extra_body=config.llm_extra_body,
             default_headers=config.llm_default_headers,
             litellmrouter_config=config.consolidation_llm_litellmrouter_config or config.llm_litellmrouter_config,

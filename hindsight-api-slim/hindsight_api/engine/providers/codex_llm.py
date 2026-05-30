@@ -272,6 +272,14 @@ class CodexLLM(LLMInterface):
         }
         return mapping.get(effort.lower(), "auto")
 
+    def _reasoning_payload(self, reasoning_summary: str) -> dict[str, str]:
+        """Build the Codex Responses API reasoning payload."""
+        reasoning = {"summary": reasoning_summary}
+        effort = self.reasoning_effort.lower()
+        if effort in {"medium", "high", "xhigh"}:
+            reasoning["effort"] = effort
+        return reasoning
+
     def _normalize_tool_choice(self, tool_choice: str | dict[str, Any]) -> str | dict[str, Any]:
         """Normalize forced function tool choice for the Codex Responses API.
 
@@ -381,7 +389,7 @@ class CodexLLM(LLMInterface):
             "tools": [],
             "tool_choice": "auto",
             "parallel_tool_calls": True,
-            "reasoning": {"summary": reasoning_summary},
+            "reasoning": self._reasoning_payload(reasoning_summary),
             "store": False,  # Codex uses stateless mode
             "stream": True,  # SSE streaming
             "include": ["reasoning.encrypted_content"],
@@ -712,7 +720,7 @@ class CodexLLM(LLMInterface):
             "tools": codex_tools,
             "tool_choice": self._normalize_tool_choice(tool_choice),
             "parallel_tool_calls": True,
-            "reasoning": {"summary": reasoning_summary},
+            "reasoning": self._reasoning_payload(reasoning_summary),
             "store": False,
             "stream": True,
             "include": ["reasoning.encrypted_content"],
