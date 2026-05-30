@@ -109,7 +109,7 @@ async def test_codex_call_sends_reasoning_effort_for_supported_levels():
 
 
 @pytest.mark.asyncio
-async def test_codex_call_omits_reasoning_effort_for_low():
+async def test_codex_call_sends_reasoning_effort_for_low():
     llm = build_llm(reasoning_effort="low")
     response = MagicMock()
     response.status_code = 200
@@ -121,7 +121,7 @@ async def test_codex_call_omits_reasoning_effort_for_low():
             await llm.call(messages=[{"role": "user", "content": "hello"}], max_retries=0)
         sent_payload = mock_post.call_args.kwargs["json"]
 
-    assert sent_payload["reasoning"] == {"summary": "concise"}
+    assert sent_payload["reasoning"] == {"summary": "concise", "effort": "low"}
 
 
 @pytest.mark.asyncio
