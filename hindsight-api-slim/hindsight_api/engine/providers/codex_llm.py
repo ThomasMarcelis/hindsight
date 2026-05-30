@@ -276,7 +276,7 @@ class CodexLLM(LLMInterface):
         """Build the Codex Responses API reasoning payload."""
         reasoning = {"summary": reasoning_summary}
         effort = self.reasoning_effort.lower()
-        if effort in {"medium", "high", "xhigh"}:
+        if effort in {"low", "medium", "high", "xhigh"}:
             reasoning["effort"] = effort
         return reasoning
 
