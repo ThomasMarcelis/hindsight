@@ -33,13 +33,17 @@ TOOLS = [
 ]
 
 
-def build_llm() -> CodexLLM:
-    with patch.object(CodexLLM, "_load_codex_auth", return_value=("token", "account")):
+def build_llm(reasoning_effort: str = "low") -> CodexLLM:
+    with (
+        patch.object(CodexLLM, "_load_codex_auth", return_value=("token", "account")),
+        patch.object(CodexLLM, "_load_codex_refresh_token", return_value="refresh"),
+    ):
         return CodexLLM(
             provider="openai-codex",
             api_key="ignored",
             base_url="https://chatgpt.com/backend-api",
             model="gpt-5.4-mini",
+            reasoning_effort=reasoning_effort,
         )
 
 
@@ -86,3 +90,55 @@ async def test_codex_forced_tool_choice_still_yields_tool_calls():
     assert len(result.tool_calls) == 1
     assert result.tool_calls[0].name == "recall"
     assert sent_payload["tool_choice"] == {"type": "function", "name": "recall"}
+
+
+@pytest.mark.asyncio
+async def test_codex_call_sends_reasoning_effort_for_supported_levels():
+    llm = build_llm(reasoning_effort="high")
+    response = MagicMock()
+    response.status_code = 200
+    response.raise_for_status.return_value = None
+    with patch.object(llm._client, "post", new_callable=AsyncMock) as mock_post:
+        mock_post.return_value = response
+        with patch.object(llm, "_parse_sse_stream", new_callable=AsyncMock) as mock_parse:
+            mock_parse.return_value = "ok"
+            await llm.call(messages=[{"role": "user", "content": "hello"}], max_retries=0)
+        sent_payload = mock_post.call_args.kwargs["json"]
+
+    assert sent_payload["reasoning"] == {"summary": "detailed", "effort": "high"}
+
+
+@pytest.mark.asyncio
+async def test_codex_call_omits_reasoning_effort_for_low():
+    llm = build_llm(reasoning_effort="low")
+    response = MagicMock()
+    response.status_code = 200
+    response.raise_for_status.return_value = None
+    with patch.object(llm._client, "post", new_callable=AsyncMock) as mock_post:
+        mock_post.return_value = response
+        with patch.object(llm, "_parse_sse_stream", new_callable=AsyncMock) as mock_parse:
+            mock_parse.return_value = "ok"
+            await llm.call(messages=[{"role": "user", "content": "hello"}], max_retries=0)
+        sent_payload = mock_post.call_args.kwargs["json"]
+
+    assert sent_payload["reasoning"] == {"summary": "concise"}
+
+
+@pytest.mark.asyncio
+async def test_codex_tool_call_sends_reasoning_effort_for_supported_levels():
+    llm = build_llm(reasoning_effort="medium")
+    response = MagicMock()
+    response.status_code = 200
+    response.raise_for_status.return_value = None
+    with patch.object(llm._client, "post", new_callable=AsyncMock) as mock_post:
+        mock_post.return_value = response
+        with patch.object(llm, "_parse_sse_tool_stream", new_callable=AsyncMock) as mock_parse:
+            mock_parse.return_value = ("ok", [])
+            await llm.call_with_tools(
+                messages=[{"role": "user", "content": "recall the memory"}],
+                tools=TOOLS,
+                max_retries=0,
+            )
+        sent_payload = mock_post.call_args.kwargs["json"]
+
+    assert sent_payload["reasoning"] == {"summary": "auto", "effort": "medium"}

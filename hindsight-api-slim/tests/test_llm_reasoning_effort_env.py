@@ -73,3 +73,57 @@ def test_memory_engine_llm_configs_use_reasoning_effort_from_env(monkeypatch):
     assert memory._reflect_llm_config.reasoning_effort == "xhigh"
     assert memory._consolidation_llm_config.reasoning_effort == "xhigh"
     _clear_config_cache()
+
+
+def test_memory_engine_llm_configs_use_per_operation_reasoning_effort_from_env(monkeypatch):
+    from hindsight_api.engine.memory_engine import MemoryEngine
+
+    monkeypatch.setenv("HINDSIGHT_API_LLM_PROVIDER", "mock")
+    monkeypatch.setenv("HINDSIGHT_API_LLM_REASONING_EFFORT", "low")
+    monkeypatch.setenv("HINDSIGHT_API_RETAIN_LLM_REASONING_EFFORT", "medium")
+    monkeypatch.setenv("HINDSIGHT_API_REFLECT_LLM_REASONING_EFFORT", "high")
+    monkeypatch.setenv("HINDSIGHT_API_CONSOLIDATION_LLM_REASONING_EFFORT", "xhigh")
+    _clear_config_cache()
+
+    memory = MemoryEngine(
+        db_url="postgresql://localhost/hindsight_test",
+        memory_llm_provider="mock",
+        memory_llm_api_key="",
+        memory_llm_model="mock",
+        embeddings=DummyEmbeddings(),
+        cross_encoder=DummyCrossEncoder(),
+        run_migrations=False,
+        skip_llm_verification=True,
+    )
+
+    assert memory._llm_config.reasoning_effort == "low"
+    assert memory._retain_llm_config.reasoning_effort == "medium"
+    assert memory._reflect_llm_config.reasoning_effort == "high"
+    assert memory._consolidation_llm_config.reasoning_effort == "xhigh"
+    _clear_config_cache()
+
+
+def test_memory_engine_explicit_per_operation_reasoning_effort_overrides_env(monkeypatch):
+    from hindsight_api.engine.memory_engine import MemoryEngine
+
+    monkeypatch.setenv("HINDSIGHT_API_LLM_PROVIDER", "mock")
+    monkeypatch.setenv("HINDSIGHT_API_LLM_REASONING_EFFORT", "low")
+    monkeypatch.setenv("HINDSIGHT_API_RETAIN_LLM_REASONING_EFFORT", "medium")
+    _clear_config_cache()
+
+    memory = MemoryEngine(
+        db_url="postgresql://localhost/hindsight_test",
+        memory_llm_provider="mock",
+        memory_llm_api_key="",
+        memory_llm_model="mock",
+        retain_llm_reasoning_effort="high",
+        embeddings=DummyEmbeddings(),
+        cross_encoder=DummyCrossEncoder(),
+        run_migrations=False,
+        skip_llm_verification=True,
+    )
+
+    assert memory._retain_llm_config.reasoning_effort == "high"
+    assert memory._reflect_llm_config.reasoning_effort == "low"
+    assert memory._consolidation_llm_config.reasoning_effort == "low"
+    _clear_config_cache()

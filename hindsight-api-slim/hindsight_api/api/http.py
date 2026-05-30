@@ -2364,6 +2364,14 @@ class FeaturesInfo(BaseModel):
     file_upload_api: bool = Field(description="Whether file upload/conversion API is enabled")
 
 
+class BuildInfo(BaseModel):
+    """Distribution metadata for this deployed build."""
+
+    distribution: str = Field(description="Distribution name for this deployment")
+    upstream_repository: str = Field(description="Upstream repository this build is based on")
+    upstream_version: str = Field(description="Upstream release version this build is based on")
+
+
 class VersionResponse(BaseModel):
     """Response model for the version/info endpoint."""
 
@@ -2371,6 +2379,11 @@ class VersionResponse(BaseModel):
         json_schema_extra={
             "example": {
                 "api_version": "0.4.0",
+                "build": {
+                    "distribution": "jd-hindsight",
+                    "upstream_repository": "vectorize-io/hindsight",
+                    "upstream_version": "0.4.0",
+                },
                 "features": {
                     "observations": False,
                     "mcp": True,
@@ -2384,6 +2397,7 @@ class VersionResponse(BaseModel):
 
     api_version: str = Field(description="API version string")
     features: FeaturesInfo = Field(description="Enabled feature flags")
+    build: BuildInfo | None = Field(default=None, description="Distribution build metadata")
 
 
 # =========================================================================
@@ -3011,12 +3025,17 @@ def _register_routes(app: FastAPI):
         Note: observations flag shows the global default. Individual banks
         may override this setting via bank-specific configuration.
         """
-        from hindsight_api import __version__
+        from hindsight_api import __distribution__, __upstream_repository__, __upstream_version__, __version__
         from hindsight_api.config import _get_raw_config
 
         config = _get_raw_config()
         return VersionResponse(
             api_version=__version__,
+            build=BuildInfo(
+                distribution=__distribution__,
+                upstream_repository=__upstream_repository__,
+                upstream_version=__upstream_version__,
+            ),
             features=FeaturesInfo(
                 observations=config.enable_observations,
                 mcp=config.mcp_enabled,
