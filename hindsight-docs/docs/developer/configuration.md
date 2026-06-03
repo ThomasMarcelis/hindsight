@@ -462,6 +462,13 @@ two slots that retain/consolidation cannot consume.
 | `HINDSIGHT_API_EMBEDDINGS_LOCAL_MODEL` | Model for local provider | `BAAI/bge-small-en-v1.5` |
 | `HINDSIGHT_API_EMBEDDINGS_LOCAL_TRUST_REMOTE_CODE` | Allow loading models with custom code (security risk, disabled by default) | `false` |
 | `HINDSIGHT_API_EMBEDDINGS_LOCAL_FORCE_CPU` | Force CPU mode for local embeddings (avoids MPS/XPC issues on macOS) | `false` |
+| `HINDSIGHT_API_EMBEDDINGS_LOCAL_QUERY_PROMPT_NAME` | SentenceTransformers prompt name for recall/search queries (for example `query`) | - |
+| `HINDSIGHT_API_EMBEDDINGS_LOCAL_QUERY_PROMPT` | Explicit query prompt prefix. Mutually exclusive with query prompt name | - |
+| `HINDSIGHT_API_EMBEDDINGS_LOCAL_DOCUMENT_PROMPT_NAME` | SentenceTransformers prompt name for retained documents/passages | - |
+| `HINDSIGHT_API_EMBEDDINGS_LOCAL_DOCUMENT_PROMPT` | Explicit document prompt prefix. Mutually exclusive with document prompt name | - |
+| `HINDSIGHT_API_EMBEDDINGS_LOCAL_TRUNCATE_DIM` | Optional Matryoshka output dimension for local models that support truncation | - |
+| `HINDSIGHT_API_EMBEDDINGS_LOCAL_NORMALIZE` | Request L2-normalized vectors from SentenceTransformers encode | `false` |
+| `HINDSIGHT_API_EMBEDDINGS_LOCAL_BATCH_SIZE` | Batch size passed to local SentenceTransformers encode | `32` |
 | `HINDSIGHT_API_EMBEDDINGS_TEI_URL` | TEI server URL | - |
 | `HINDSIGHT_API_EMBEDDINGS_OPENAI_API_KEY` | OpenAI API key (falls back to `HINDSIGHT_API_LLM_API_KEY`) | - |
 | `HINDSIGHT_API_EMBEDDINGS_OPENAI_MODEL` | OpenAI embedding model | `text-embedding-3-small` |
@@ -532,6 +539,13 @@ export HINDSIGHT_API_EMBEDDINGS_LOCAL_MODEL=BAAI/bge-small-en-v1.5
 # WARNING: Only enable trust_remote_code for models you trust (security risk)
 # export HINDSIGHT_API_EMBEDDINGS_LOCAL_MODEL=your-custom-model
 # export HINDSIGHT_API_EMBEDDINGS_LOCAL_TRUST_REMOTE_CODE=true
+
+# Local instruction/MRL-aware models
+# export HINDSIGHT_API_EMBEDDINGS_LOCAL_MODEL=Qwen/Qwen3-Embedding-4B
+# export HINDSIGHT_API_EMBEDDINGS_LOCAL_QUERY_PROMPT_NAME=query
+# export HINDSIGHT_API_EMBEDDINGS_LOCAL_TRUNCATE_DIM=2000
+# export HINDSIGHT_API_EMBEDDINGS_LOCAL_NORMALIZE=true
+# export HINDSIGHT_API_EMBEDDINGS_LOCAL_BATCH_SIZE=8
 
 # OpenAI - cloud-based embeddings
 export HINDSIGHT_API_EMBEDDINGS_PROVIDER=openai
@@ -620,6 +634,8 @@ Hindsight automatically detects the embedding dimension from the model at startu
 
 For `litellm-sdk`, if you set `HINDSIGHT_API_EMBEDDINGS_LITELLM_SDK_OUTPUT_DIMENSIONS`, startup uses that output size when the underlying provider supports LiteLLM's `dimensions` parameter (otherwise behavior is unchanged). The same dimension-change rules below apply.
 
+For `local`, prompt and truncation settings are part of the embedding profile. Hindsight logs a local embedding profile fingerprint at startup so operators can spot same-dimension model swaps that the database schema cannot detect.
+
 For `zeroentropy`, zembed-1 supports `2560`, `1280`, `640`, `320`, `160`, `80`, and `40` dimensions. ZeroEntropy's API default is `2560`; Hindsight defaults to `1280` so the provider works with the default pgvector HNSW index. Use `2560` with a vector extension that supports higher-dimensional indexes, such as DiskANN/pgvectorscale or ScaNN.
 
 :::warning Dimension Changes
@@ -627,6 +643,10 @@ Once memories are stored, you cannot change the embedding dimension without losi
 
 1. **Empty database**: The schema is adjusted automatically on startup
 2. **Existing data**: Either delete all memories first, or use a model with matching dimensions
+
+Changing the model, prompt, normalization, or truncation while keeping the same dimension still creates a different embedding space. Hindsight logs a profile fingerprint for local models, but same-dimension changes still require a full re-embed/reprocess of existing memories.
+
+With the default `pgvector` HNSW index, keep `HINDSIGHT_API_EMBEDDINGS_LOCAL_TRUNCATE_DIM` at `2000` or lower. Native 2048+ dimensional local models require a different vector/index strategy.
 
 Supported OpenAI embedding dimensions:
 - `text-embedding-3-small`: 1536 dimensions

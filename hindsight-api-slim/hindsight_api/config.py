@@ -212,6 +212,13 @@ ENV_EMBEDDINGS_PROVIDER = "HINDSIGHT_API_EMBEDDINGS_PROVIDER"
 ENV_EMBEDDINGS_LOCAL_MODEL = "HINDSIGHT_API_EMBEDDINGS_LOCAL_MODEL"
 ENV_EMBEDDINGS_LOCAL_FORCE_CPU = "HINDSIGHT_API_EMBEDDINGS_LOCAL_FORCE_CPU"
 ENV_EMBEDDINGS_LOCAL_TRUST_REMOTE_CODE = "HINDSIGHT_API_EMBEDDINGS_LOCAL_TRUST_REMOTE_CODE"
+ENV_EMBEDDINGS_LOCAL_QUERY_PROMPT_NAME = "HINDSIGHT_API_EMBEDDINGS_LOCAL_QUERY_PROMPT_NAME"
+ENV_EMBEDDINGS_LOCAL_QUERY_PROMPT = "HINDSIGHT_API_EMBEDDINGS_LOCAL_QUERY_PROMPT"
+ENV_EMBEDDINGS_LOCAL_DOCUMENT_PROMPT_NAME = "HINDSIGHT_API_EMBEDDINGS_LOCAL_DOCUMENT_PROMPT_NAME"
+ENV_EMBEDDINGS_LOCAL_DOCUMENT_PROMPT = "HINDSIGHT_API_EMBEDDINGS_LOCAL_DOCUMENT_PROMPT"
+ENV_EMBEDDINGS_LOCAL_TRUNCATE_DIM = "HINDSIGHT_API_EMBEDDINGS_LOCAL_TRUNCATE_DIM"
+ENV_EMBEDDINGS_LOCAL_NORMALIZE = "HINDSIGHT_API_EMBEDDINGS_LOCAL_NORMALIZE"
+ENV_EMBEDDINGS_LOCAL_BATCH_SIZE = "HINDSIGHT_API_EMBEDDINGS_LOCAL_BATCH_SIZE"
 ENV_EMBEDDINGS_TEI_URL = "HINDSIGHT_API_EMBEDDINGS_TEI_URL"
 ENV_EMBEDDINGS_OPENAI_API_KEY = "HINDSIGHT_API_EMBEDDINGS_OPENAI_API_KEY"
 ENV_EMBEDDINGS_OPENAI_MODEL = "HINDSIGHT_API_EMBEDDINGS_OPENAI_MODEL"
@@ -564,6 +571,13 @@ DEFAULT_EMBEDDINGS_PROVIDER = "local"
 DEFAULT_EMBEDDINGS_LOCAL_MODEL = "BAAI/bge-small-en-v1.5"
 DEFAULT_EMBEDDINGS_LOCAL_FORCE_CPU = False  # Force CPU mode for local embeddings
 DEFAULT_EMBEDDINGS_LOCAL_TRUST_REMOTE_CODE = False  # Security: disabled by default, required for some models
+DEFAULT_EMBEDDINGS_LOCAL_QUERY_PROMPT_NAME = None
+DEFAULT_EMBEDDINGS_LOCAL_QUERY_PROMPT = None
+DEFAULT_EMBEDDINGS_LOCAL_DOCUMENT_PROMPT_NAME = None
+DEFAULT_EMBEDDINGS_LOCAL_DOCUMENT_PROMPT = None
+DEFAULT_EMBEDDINGS_LOCAL_TRUNCATE_DIM = None
+DEFAULT_EMBEDDINGS_LOCAL_NORMALIZE = False
+DEFAULT_EMBEDDINGS_LOCAL_BATCH_SIZE = 32
 DEFAULT_EMBEDDINGS_OPENAI_MODEL = "text-embedding-3-small"
 DEFAULT_EMBEDDINGS_OPENAI_BATCH_SIZE = 100
 DEFAULT_EMBEDDINGS_GEMINI_MODEL = "gemini-embedding-001"
@@ -1365,6 +1379,13 @@ class HindsightConfig:
     # Keep at the end of the dataclass; Python forbids non-default fields after default fields.
     embeddings_openai_batch_size: int = DEFAULT_EMBEDDINGS_OPENAI_BATCH_SIZE
     embeddings_openai_dimensions: int | None = None
+    embeddings_local_query_prompt_name: str | None = DEFAULT_EMBEDDINGS_LOCAL_QUERY_PROMPT_NAME
+    embeddings_local_query_prompt: str | None = DEFAULT_EMBEDDINGS_LOCAL_QUERY_PROMPT
+    embeddings_local_document_prompt_name: str | None = DEFAULT_EMBEDDINGS_LOCAL_DOCUMENT_PROMPT_NAME
+    embeddings_local_document_prompt: str | None = DEFAULT_EMBEDDINGS_LOCAL_DOCUMENT_PROMPT
+    embeddings_local_truncate_dim: int | None = DEFAULT_EMBEDDINGS_LOCAL_TRUNCATE_DIM
+    embeddings_local_normalize: bool = DEFAULT_EMBEDDINGS_LOCAL_NORMALIZE
+    embeddings_local_batch_size: int = DEFAULT_EMBEDDINGS_LOCAL_BATCH_SIZE
     embeddings_zeroentropy_api_key: str | None = None
     embeddings_zeroentropy_model: str = DEFAULT_EMBEDDINGS_ZEROENTROPY_MODEL
     embeddings_zeroentropy_base_url: str = DEFAULT_ZEROENTROPY_BASE_URL
@@ -1764,6 +1785,23 @@ class HindsightConfig:
                 ENV_EMBEDDINGS_LOCAL_TRUST_REMOTE_CODE, str(DEFAULT_EMBEDDINGS_LOCAL_TRUST_REMOTE_CODE)
             ).lower()
             in ("true", "1"),
+            embeddings_local_query_prompt_name=os.getenv(ENV_EMBEDDINGS_LOCAL_QUERY_PROMPT_NAME) or None,
+            embeddings_local_query_prompt=os.getenv(ENV_EMBEDDINGS_LOCAL_QUERY_PROMPT) or None,
+            embeddings_local_document_prompt_name=os.getenv(ENV_EMBEDDINGS_LOCAL_DOCUMENT_PROMPT_NAME) or None,
+            embeddings_local_document_prompt=os.getenv(ENV_EMBEDDINGS_LOCAL_DOCUMENT_PROMPT) or None,
+            embeddings_local_truncate_dim=_parse_optional_positive_int(
+                ENV_EMBEDDINGS_LOCAL_TRUNCATE_DIM,
+                os.getenv(ENV_EMBEDDINGS_LOCAL_TRUNCATE_DIM),
+            ),
+            embeddings_local_normalize=os.getenv(
+                ENV_EMBEDDINGS_LOCAL_NORMALIZE, str(DEFAULT_EMBEDDINGS_LOCAL_NORMALIZE)
+            ).lower()
+            in ("true", "1"),
+            embeddings_local_batch_size=_parse_positive_int(
+                ENV_EMBEDDINGS_LOCAL_BATCH_SIZE,
+                os.getenv(ENV_EMBEDDINGS_LOCAL_BATCH_SIZE),
+                DEFAULT_EMBEDDINGS_LOCAL_BATCH_SIZE,
+            ),
             embeddings_tei_url=os.getenv(ENV_EMBEDDINGS_TEI_URL),
             embeddings_openai_base_url=os.getenv(ENV_EMBEDDINGS_OPENAI_BASE_URL) or None,
             embeddings_openai_batch_size=_parse_positive_int(
