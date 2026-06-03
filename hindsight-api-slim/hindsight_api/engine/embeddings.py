@@ -10,6 +10,7 @@ Configuration via environment variables - see hindsight_api.config for all env v
 """
 
 import base64
+import hashlib
 import logging
 import os
 import struct
@@ -26,8 +27,10 @@ from ..config import (
     DEFAULT_EMBEDDINGS_GEMINI_MODEL,
     DEFAULT_EMBEDDINGS_LITELLM_MODEL,
     DEFAULT_EMBEDDINGS_LITELLM_SDK_MODEL,
+    DEFAULT_EMBEDDINGS_LOCAL_BATCH_SIZE,
     DEFAULT_EMBEDDINGS_LOCAL_FORCE_CPU,
     DEFAULT_EMBEDDINGS_LOCAL_MODEL,
+    DEFAULT_EMBEDDINGS_LOCAL_NORMALIZE,
     DEFAULT_EMBEDDINGS_LOCAL_TRUST_REMOTE_CODE,
     DEFAULT_EMBEDDINGS_OPENAI_MODEL,
     DEFAULT_EMBEDDINGS_PROVIDER,
@@ -40,9 +43,7 @@ from ..config import (
     DEFAULT_ZEROENTROPY_BASE_URL,
     ENV_EMBEDDINGS_COHERE_API_KEY,
     ENV_EMBEDDINGS_GEMINI_API_KEY,
-    ENV_EMBEDDINGS_LOCAL_FORCE_CPU,
-    ENV_EMBEDDINGS_LOCAL_MODEL,
-    ENV_EMBEDDINGS_LOCAL_TRUST_REMOTE_CODE,
+    ENV_EMBEDDINGS_LOCAL_TRUNCATE_DIM,
     ENV_EMBEDDINGS_OPENAI_API_KEY,
     ENV_EMBEDDINGS_OPENAI_BASE_URL,
     ENV_EMBEDDINGS_OPENAI_MODEL,
@@ -79,6 +80,27 @@ class _ZeroEntropyEmbedResult(BaseModel):
 
 class _ZeroEntropyEmbedResponse(BaseModel):
     results: list[_ZeroEntropyEmbedResult]
+
+
+class LocalSTEmbeddingProfile(BaseModel):
+    """Stable identity for the local embedding space produced by SentenceTransformers."""
+
+    provider: Literal["local"] = "local"
+    model_name: str
+    dimension: int
+    trust_remote_code: bool
+    query_prompt_name: str | None = None
+    query_prompt: str | None = None
+    document_prompt_name: str | None = None
+    document_prompt: str | None = None
+    truncate_dim: int | None = None
+    normalize_embeddings: bool = False
+
+    @property
+    def fingerprint(self) -> str:
+        """Hash all embedding-space-affecting options so same-dim model swaps are visible."""
+        payload = self.model_dump_json(exclude_none=False)
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 class Embeddings(ABC):
@@ -141,7 +163,19 @@ class LocalSTEmbeddings(Embeddings):
     The embedding dimension is auto-detected from the model.
     """
 
-    def __init__(self, model_name: str | None = None, force_cpu: bool = False, trust_remote_code: bool = False):
+    def __init__(
+        self,
+        model_name: str | None = None,
+        force_cpu: bool = False,
+        trust_remote_code: bool = False,
+        query_prompt_name: str | None = None,
+        query_prompt: str | None = None,
+        document_prompt_name: str | None = None,
+        document_prompt: str | None = None,
+        truncate_dim: int | None = None,
+        normalize_embeddings: bool = DEFAULT_EMBEDDINGS_LOCAL_NORMALIZE,
+        batch_size: int = DEFAULT_EMBEDDINGS_LOCAL_BATCH_SIZE,
+    ):
         """
         Initialize local SentenceTransformers embeddings.
 
@@ -153,10 +187,33 @@ class LocalSTEmbeddings(Embeddings):
             trust_remote_code: Allow loading models with custom code (security risk).
                               Required for some models with custom architectures.
                               Default: False (disabled for security)
+            query_prompt_name: SentenceTransformers prompt name used for recall/search queries.
+            query_prompt: Explicit prompt prefix used for recall/search queries.
+            document_prompt_name: SentenceTransformers prompt name used for retained documents.
+            document_prompt: Explicit prompt prefix used for retained documents.
+            truncate_dim: Optional Matryoshka output dimension for models that support truncation.
+            normalize_embeddings: Request L2-normalized embeddings from SentenceTransformers encode().
+            batch_size: Batch size passed to SentenceTransformers encode().
         """
+        if query_prompt_name and query_prompt:
+            raise ValueError("query_prompt_name and query_prompt are mutually exclusive")
+        if document_prompt_name and document_prompt:
+            raise ValueError("document_prompt_name and document_prompt are mutually exclusive")
+        if truncate_dim is not None and truncate_dim < 1:
+            raise ValueError("truncate_dim must be >= 1")
+        if batch_size < 1:
+            raise ValueError("batch_size must be >= 1")
+
         self.model_name = model_name or DEFAULT_EMBEDDINGS_LOCAL_MODEL
         self.force_cpu = force_cpu
         self.trust_remote_code = trust_remote_code
+        self.query_prompt_name = query_prompt_name
+        self.query_prompt = query_prompt
+        self.document_prompt_name = document_prompt_name
+        self.document_prompt = document_prompt
+        self.truncate_dim = truncate_dim
+        self.normalize_embeddings = normalize_embeddings
+        self.batch_size = batch_size
         self._model = None
         self._dimension: int | None = None
 
@@ -169,6 +226,26 @@ class LocalSTEmbeddings(Embeddings):
         if self._dimension is None:
             raise RuntimeError("Embeddings not initialized. Call initialize() first.")
         return self._dimension
+
+    @property
+    def profile(self) -> LocalSTEmbeddingProfile:
+        if self._dimension is None:
+            raise RuntimeError("Embeddings not initialized. Call initialize() first.")
+        return LocalSTEmbeddingProfile(
+            model_name=self.model_name,
+            dimension=self._dimension,
+            trust_remote_code=self.trust_remote_code,
+            query_prompt_name=self.query_prompt_name,
+            query_prompt=self.query_prompt,
+            document_prompt_name=self.document_prompt_name,
+            document_prompt=self.document_prompt,
+            truncate_dim=self.truncate_dim,
+            normalize_embeddings=self.normalize_embeddings,
+        )
+
+    @property
+    def profile_fingerprint(self) -> str:
+        return self.profile.fingerprint
 
     async def initialize(self) -> None:
         """Load the embedding model."""
@@ -183,7 +260,13 @@ class LocalSTEmbeddings(Embeddings):
                 "Install it with: pip install sentence-transformers"
             )
 
-        logger.info(f"Embeddings: initializing local provider with model {self.model_name}")
+        logger.info(
+            "Embeddings: initializing local provider with model %s (truncate_dim=%s, normalize=%s, batch_size=%s)",
+            self.model_name,
+            self.truncate_dim,
+            self.normalize_embeddings,
+            self.batch_size,
+        )
 
         # Determine device based on hardware availability.
         # We always set low_cpu_mem_usage=False to prevent lazy loading (meta tensors)
@@ -232,12 +315,25 @@ class LocalSTEmbeddings(Embeddings):
                 # Restore original logging level
                 transformers_logger.setLevel(original_level)
 
-        self._dimension = self._model.get_sentence_embedding_dimension()
-        logger.info(f"Embeddings: local provider initialized (dim: {self._dimension})")
+        native_dimension = self._model.get_sentence_embedding_dimension()
+        if native_dimension is None:
+            raise RuntimeError(f"Unable to detect embedding dimension for model {self.model_name}")
+        if self.truncate_dim is not None and self.truncate_dim > native_dimension:
+            raise ValueError(
+                f"{ENV_EMBEDDINGS_LOCAL_TRUNCATE_DIM}={self.truncate_dim} exceeds native embedding "
+                f"dimension {native_dimension} for model {self.model_name}"
+            )
+
+        self._dimension = self.truncate_dim or native_dimension
+        logger.info(
+            "Embeddings: local provider initialized (dim: %s, profile_fingerprint=%s)",
+            self._dimension,
+            self.profile_fingerprint,
+        )
 
     def encode(self, texts: list[str]) -> list[list[float]]:
         """
-        Generate embeddings for a list of texts.
+        Generate document-side embeddings for a list of texts.
 
         Args:
             texts: List of text strings to encode
@@ -245,10 +341,32 @@ class LocalSTEmbeddings(Embeddings):
         Returns:
             List of embedding vectors
         """
+        return self.encode_documents(texts)
+
+    def encode_query(self, texts: list[str]) -> list[list[float]]:
+        """Generate query-side embeddings for recall/search queries."""
+        return self._encode_with_prompt(texts, self.query_prompt_name, self.query_prompt)
+
+    def encode_documents(self, texts: list[str]) -> list[list[float]]:
+        """Generate document-side embeddings for retained content."""
+        return self._encode_with_prompt(texts, self.document_prompt_name, self.document_prompt)
+
+    def _encode_with_prompt(
+        self, texts: list[str], prompt_name: str | None = None, prompt: str | None = None
+    ) -> list[list[float]]:
         if self._model is None:
             raise RuntimeError("Embeddings not initialized. Call initialize() first.")
 
-        embeddings = self._model.encode(texts, convert_to_numpy=True, show_progress_bar=False)
+        embeddings = self._model.encode(
+            texts,
+            convert_to_numpy=True,
+            show_progress_bar=False,
+            batch_size=self.batch_size,
+            prompt_name=prompt_name,
+            prompt=prompt,
+            truncate_dim=self.truncate_dim,
+            normalize_embeddings=self.normalize_embeddings,
+        )
         return [emb.tolist() for emb in embeddings]
 
 
@@ -1390,6 +1508,13 @@ def create_embeddings_from_env() -> Embeddings:
             model_name=config.embeddings_local_model,
             force_cpu=config.embeddings_local_force_cpu,
             trust_remote_code=config.embeddings_local_trust_remote_code,
+            query_prompt_name=config.embeddings_local_query_prompt_name,
+            query_prompt=config.embeddings_local_query_prompt,
+            document_prompt_name=config.embeddings_local_document_prompt_name,
+            document_prompt=config.embeddings_local_document_prompt,
+            truncate_dim=config.embeddings_local_truncate_dim,
+            normalize_embeddings=config.embeddings_local_normalize,
+            batch_size=config.embeddings_local_batch_size,
         )
     elif provider == "openai":
         # Use dedicated embeddings API key, or fall back to LLM API key

@@ -437,7 +437,50 @@ Converts text into dense vector representations for semantic similarity search.
 | Model | Dimensions | Use Case |
 |-------|------------|----------|
 | `BAAI/bge-small-en-v1.5` | 384 | Default, fast, good quality |
+| `BAAI/bge-large-en-v1.5` | 1024 | Higher-quality English retrieval |
+| `Snowflake/snowflake-arctic-embed-l-v2.0` | 1024 | Multilingual retrieval with query prompt support |
+| `Qwen/Qwen3-Embedding-0.6B` | 1024 | Instruction-aware multilingual/code retrieval |
+| `Qwen/Qwen3-Embedding-4B` | 2560 native, configurable | Higher-quality instruction-aware retrieval; use `2000` or lower with default pgvector HNSW |
+| `voyageai/voyage-4-nano` | 2048/1024/512/256 | Open local Voyage 4 model; requires `trust_remote_code` |
 | `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` | 384 | Multilingual (50+ languages) |
+
+Modern local embedding models often need query/document prompt configuration for best retrieval quality. Hindsight sends recall/search text through the query path and retained memory text through the document path, so configure prompts on the local provider when the model card recommends them.
+
+```bash
+# Qwen3 embedding models use a named query prompt for retrieval queries.
+export HINDSIGHT_API_EMBEDDINGS_PROVIDER=local
+export HINDSIGHT_API_EMBEDDINGS_LOCAL_MODEL=Qwen/Qwen3-Embedding-4B
+export HINDSIGHT_API_EMBEDDINGS_LOCAL_QUERY_PROMPT_NAME=query
+export HINDSIGHT_API_EMBEDDINGS_LOCAL_TRUNCATE_DIM=2000
+export HINDSIGHT_API_EMBEDDINGS_LOCAL_NORMALIZE=true
+```
+
+Changing prompts, truncation, normalization, or model ID changes the embedding profile even when the vector dimension stays the same. Re-embed/reprocess existing memories after any profile change.
+
+Suggested local benchmark matrix before switching a populated Hindsight instance:
+
+| Model | Dimensions to test |
+|-------|--------------------|
+| `Qwen/Qwen3-Embedding-4B` | `1024`, `2000` |
+| `voyageai/voyage-4-nano` | `1024`, `2000` if supported cleanly; otherwise `1024` plus an offline `2048` ceiling test |
+| `Qwen/Qwen3-Embedding-0.6B` | `1024` |
+| `Snowflake/snowflake-arctic-embed-l-v2.0` | `1024`; optionally `256` for speed/storage curiosity |
+| `BAAI/bge-large-en-v1.5` | `1024` baseline |
+
+With default pgvector HNSW, use `2000` as the clean upper bound. `2048` is over the current index guard and should only be tested offline unless you also change the vector storage/index strategy.
+
+To run the local matrix without activating a model or touching a Hindsight database:
+
+```bash
+./scripts/benchmarks/run-local-embedding-matrix.sh --list
+./scripts/benchmarks/run-local-embedding-matrix.sh --models qwen3-embedding-4b,bge-large-baseline --device cpu
+./scripts/benchmarks/run-local-embedding-matrix.sh --models bge-large-baseline --local-files-only
+
+# Optional offline-only ceiling/curiosity runs:
+./scripts/benchmarks/run-local-embedding-matrix.sh --include-over-limit --include-curiosities --list
+```
+
+The benchmark reports load time, document/query throughput, a small retrieval sanity score, and the local embedding profile fingerprint for each model/dimension pair. Treat it as a pre-filter before a full corpus reprocess, not as a replacement for live recall evaluation.
 
 ### OpenAI Models
 
@@ -480,9 +523,15 @@ Hindsight automatically detects the embedding dimension at startup and adjusts t
 export HINDSIGHT_API_EMBEDDINGS_PROVIDER=local
 export HINDSIGHT_API_EMBEDDINGS_LOCAL_MODEL=BAAI/bge-small-en-v1.5
 
+# Local prompt/MRL-aware model
+export HINDSIGHT_API_EMBEDDINGS_PROVIDER=local
+export HINDSIGHT_API_EMBEDDINGS_LOCAL_MODEL=Qwen/Qwen3-Embedding-4B
+export HINDSIGHT_API_EMBEDDINGS_LOCAL_QUERY_PROMPT_NAME=query
+export HINDSIGHT_API_EMBEDDINGS_LOCAL_TRUNCATE_DIM=2000
+
 # OpenAI
 export HINDSIGHT_API_EMBEDDINGS_PROVIDER=openai
-export HINDSIGHT_API_EMBEDDINGS_OPENAI_API_KEY=sk-xxxxxxxxxxxx
+export HINDSIGHT_API_EMBEDDINGS_OPENAI_API_KEY=***
 export HINDSIGHT_API_EMBEDDINGS_OPENAI_MODEL=text-embedding-3-small
 
 # Cohere
