@@ -22,7 +22,6 @@ from typing import TYPE_CHECKING, Any, Literal, cast, overload
 
 import asyncpg
 import httpx
-import tiktoken
 
 from .._vector_index import ann_search_tuning_settings, configured_vector_extension
 from ..config import (
@@ -215,13 +214,15 @@ if TYPE_CHECKING:
     from hindsight_api.extensions import OperationValidatorExtension, TenantExtension
     from hindsight_api.models import RequestContext
 
+    from .audit import AuditLogListResponse, AuditLogStatsResponse
+
 
 from enum import Enum
 
 from ..metrics import get_metrics_collector
 from ..pg0 import EmbeddedPostgres, parse_pg0_url
 from .entity_resolver import EntityResolver
-from .llm_wrapper import LLMConfig, requires_api_key, sanitize_llm_output
+from .llm_wrapper import LLMConfig, requires_api_key, sanitize_llm_output, sanitize_text
 from .query_analyzer import QueryAnalyzer
 from .reflect import run_reflect_agent
 from .reflect.prompts import DELTA_SYSTEM_PROMPT, build_delta_prompt
@@ -244,6 +245,7 @@ from .search import think_utils
 from .search.reranking import CrossEncoderReranker, apply_combined_scoring
 from .search.tags import TagGroup, TagsMatch, build_tag_groups_where_clause, build_tags_where_clause
 from .task_backend import TaskBackend
+from .token_encoding import get_token_encoding
 
 RetainOutboxCallback = Callable[[asyncpg.Connection], Awaitable[None]]
 RetainOutboxCallbackFactory = Callable[[list[RetainContentDict]], RetainOutboxCallback | None]
@@ -521,16 +523,14 @@ logger = logging.getLogger(__name__)
 
 from .db_utils import acquire_with_retry
 
-# Cache tiktoken encoding for token budget filtering (module-level singleton)
-_TIKTOKEN_ENCODING = None
-
 
 def _get_tiktoken_encoding():
-    """Get cached tiktoken encoding (cl100k_base for GPT-4/3.5)."""
-    global _TIKTOKEN_ENCODING
-    if _TIKTOKEN_ENCODING is None:
-        _TIKTOKEN_ENCODING = tiktoken.get_encoding("cl100k_base")
-    return _TIKTOKEN_ENCODING
+    """Get cached tiktoken encoding (cl100k_base for GPT-4/3.5).
+
+    Returns a wrapper that tolerates special-token literals in user content
+    (see hindsight_api.engine.token_encoding).
+    """
+    return get_token_encoding()
 
 
 @dataclass(frozen=True)
@@ -630,14 +630,17 @@ class MemoryEngine(MemoryEngineInterface):
         retain_llm_api_key: str | None = None,
         retain_llm_model: str | None = None,
         retain_llm_base_url: str | None = None,
+        retain_llm_reasoning_effort: str | None = None,
         reflect_llm_provider: str | None = None,
         reflect_llm_api_key: str | None = None,
         reflect_llm_model: str | None = None,
         reflect_llm_base_url: str | None = None,
+        reflect_llm_reasoning_effort: str | None = None,
         consolidation_llm_provider: str | None = None,
         consolidation_llm_api_key: str | None = None,
         consolidation_llm_model: str | None = None,
         consolidation_llm_base_url: str | None = None,
+        consolidation_llm_reasoning_effort: str | None = None,
         embeddings: Embeddings | None = None,
         cross_encoder: CrossEncoderModel | None = None,
         query_analyzer: QueryAnalyzer | None = None,
@@ -669,14 +672,17 @@ class MemoryEngine(MemoryEngineInterface):
             retain_llm_api_key: API key for retain LLM. Falls back to memory_llm_api_key.
             retain_llm_model: Model for retain operations. Falls back to memory_llm_model.
             retain_llm_base_url: Base URL for retain LLM. Falls back to memory_llm_base_url.
+            retain_llm_reasoning_effort: Reasoning effort for retain LLM. Falls back to global reasoning effort.
             reflect_llm_provider: LLM provider for reflect operations. Falls back to memory_llm_provider.
             reflect_llm_api_key: API key for reflect LLM. Falls back to memory_llm_api_key.
             reflect_llm_model: Model for reflect operations. Falls back to memory_llm_model.
             reflect_llm_base_url: Base URL for reflect LLM. Falls back to memory_llm_base_url.
+            reflect_llm_reasoning_effort: Reasoning effort for reflect LLM. Falls back to global reasoning effort.
             consolidation_llm_provider: LLM provider for consolidation operations. Falls back to memory_llm_provider.
             consolidation_llm_api_key: API key for consolidation LLM. Falls back to memory_llm_api_key.
             consolidation_llm_model: Model for consolidation operations. Falls back to memory_llm_model.
             consolidation_llm_base_url: Base URL for consolidation LLM. Falls back to memory_llm_base_url.
+            consolidation_llm_reasoning_effort: Reasoning effort for consolidation LLM. Falls back to global reasoning effort.
             embeddings: Embeddings implementation. If not provided, created from env vars.
             cross_encoder: Cross-encoder model. If not provided, created from env vars.
             query_analyzer: Query analyzer implementation. If not provided, uses DateparserQueryAnalyzer.
@@ -807,6 +813,9 @@ class MemoryEngine(MemoryEngineInterface):
         retain_api_key = retain_llm_api_key or config.retain_llm_api_key or memory_llm_api_key
         retain_model = retain_llm_model or config.retain_llm_model or memory_llm_model
         retain_base_url = retain_llm_base_url or config.retain_llm_base_url or memory_llm_base_url
+        retain_reasoning_effort = (
+            retain_llm_reasoning_effort or config.retain_llm_reasoning_effort or config.llm_reasoning_effort
+        )
         # Apply provider-specific base URL defaults for retain
         if retain_base_url is None:
             if retain_provider.lower() == "groq":
@@ -823,7 +832,7 @@ class MemoryEngine(MemoryEngineInterface):
             api_key=retain_api_key,
             base_url=retain_base_url,
             model=retain_model,
-            reasoning_effort=config.llm_reasoning_effort,
+            reasoning_effort=retain_reasoning_effort,
             extra_body=config.llm_extra_body,
             default_headers=config.llm_default_headers,
             litellmrouter_config=config.retain_llm_litellmrouter_config or config.llm_litellmrouter_config,
@@ -834,6 +843,9 @@ class MemoryEngine(MemoryEngineInterface):
         reflect_api_key = reflect_llm_api_key or config.reflect_llm_api_key or memory_llm_api_key
         reflect_model = reflect_llm_model or config.reflect_llm_model or memory_llm_model
         reflect_base_url = reflect_llm_base_url or config.reflect_llm_base_url or memory_llm_base_url
+        reflect_reasoning_effort = (
+            reflect_llm_reasoning_effort or config.reflect_llm_reasoning_effort or config.llm_reasoning_effort
+        )
         # Apply provider-specific base URL defaults for reflect
         if reflect_base_url is None:
             if reflect_provider.lower() == "groq":
@@ -850,7 +862,7 @@ class MemoryEngine(MemoryEngineInterface):
             api_key=reflect_api_key,
             base_url=reflect_base_url,
             model=reflect_model,
-            reasoning_effort=config.llm_reasoning_effort,
+            reasoning_effort=reflect_reasoning_effort,
             extra_body=config.llm_extra_body,
             default_headers=config.llm_default_headers,
             litellmrouter_config=config.reflect_llm_litellmrouter_config or config.llm_litellmrouter_config,
@@ -861,6 +873,11 @@ class MemoryEngine(MemoryEngineInterface):
         consolidation_api_key = consolidation_llm_api_key or config.consolidation_llm_api_key or memory_llm_api_key
         consolidation_model = consolidation_llm_model or config.consolidation_llm_model or memory_llm_model
         consolidation_base_url = consolidation_llm_base_url or config.consolidation_llm_base_url or memory_llm_base_url
+        consolidation_reasoning_effort = (
+            consolidation_llm_reasoning_effort
+            or config.consolidation_llm_reasoning_effort
+            or config.llm_reasoning_effort
+        )
         # Apply provider-specific base URL defaults for consolidation
         if consolidation_base_url is None:
             if consolidation_provider.lower() == "groq":
@@ -877,7 +894,7 @@ class MemoryEngine(MemoryEngineInterface):
             api_key=consolidation_api_key,
             base_url=consolidation_base_url,
             model=consolidation_model,
-            reasoning_effort=config.llm_reasoning_effort,
+            reasoning_effort=consolidation_reasoning_effort,
             extra_body=config.llm_extra_body,
             default_headers=config.llm_default_headers,
             litellmrouter_config=config.consolidation_llm_litellmrouter_config or config.llm_litellmrouter_config,
@@ -2723,6 +2740,15 @@ class MemoryEngine(MemoryEngineInterface):
         # those mutations leak back to the caller's dicts.
         contents = cast(list[RetainContentDict], [dict(c) for c in contents])
 
+        # Sanitize content/context at ingress so lone UTF-16 surrogates (e.g. a
+        # half-emoji a client serialized as a `\udXXX` escape) cannot crash the
+        # embedder, cross-encoder, or logging with an HTTP 500 (see issue #1875).
+        for item in contents:
+            if "content" in item:
+                item["content"] = sanitize_text(item["content"]) or ""
+            if item.get("context"):
+                item["context"] = sanitize_text(item["context"]) or ""
+
         # Apply batch-level document_id to contents that don't have their own (backwards compatibility)
         if document_id:
             for item in contents:
@@ -2791,6 +2817,44 @@ class MemoryEngine(MemoryEngineInterface):
             # multiple sub-batches, unit_ids from every chunk get
             # appended back into that input's result slot.
             per_input_results: list[list[str]] = [[] for _ in contents]
+
+            # Per-document chunk_index offsets. When an oversized single item is
+            # sliced into several sub-batches that all share one document_id and
+            # run sequentially, each sub-batch must continue the document's
+            # chunk_index sequence rather than restart at 0 — otherwise the
+            # derived chunk_id ({bank}_{doc}_{index}) collides and later
+            # sub-batches overwrite earlier chunks, leaving only one sub-batch's
+            # worth of chunks/memories (issue #1888). Counting uses the same
+            # bank-resolved, strategy-applied chunk size the orchestrator chunks
+            # with, so the offsets match the chunk_index values it assigns.
+            from .retain import fact_extraction, fact_storage
+
+            sub_chunk_size = await self._resolve_retain_chunk_size(bank_id, request_context, strategy)
+            chunk_offsets: dict[str, int] = {}
+
+            # In update_mode="append", retain_batch prepends the existing document
+            # body to the FIRST sub-batch as an extra content item before chunking
+            # (see orchestrator.retain_batch), consuming chunks(existing_body)
+            # additional chunk_index slots ahead of that sub-batch's own content.
+            # Capture that chunk count per document up front — the first sub-batch
+            # overwrites documents.original_text when it commits, so it can't be
+            # read back afterwards — and fold it into the offset so later
+            # sub-batches continue past the prepended chunks instead of colliding.
+            append_prepend_chunks: dict[str, int] = {}
+            backend = await self._get_backend()
+            append_doc_ids: set[str] = set()
+            for item in contents:
+                item_doc_id = item.get("document_id")
+                if item.get("update_mode") == "append" and item_doc_id:
+                    append_doc_ids.add(item_doc_id)
+            for append_doc_id in append_doc_ids:
+                async with acquire_with_retry(backend) as conn:
+                    existing_text = await fact_storage.get_document_content(conn, bank_id, append_doc_id)
+                if existing_text:
+                    append_prepend_chunks[append_doc_id] = len(
+                        fact_extraction.chunk_text(existing_text, sub_chunk_size)
+                    )
+
             for i, (sub_batch, sub_origins) in enumerate(zip(sub_batches, origin_indices), 1):
                 # Checkpoint: abort if the operation was deleted (bank was deleted) between sub-batches.
                 if operation_id and not await self._check_op_alive(operation_id):
@@ -2805,6 +2869,14 @@ class MemoryEngine(MemoryEngineInterface):
                 logger.info(
                     f"Processing sub-batch {i}/{len(sub_batches)}: {len(sub_batch)} items, {sub_batch_tokens:,} tokens"
                 )
+
+                # Resolve the document this sub-batch writes to so we can offset
+                # its chunk_index past chunks already stored by earlier
+                # sub-batches of the same document. Only the oversized-single-item
+                # split shares a document_id across sub-batches; packed multi-item
+                # sub-batches carry distinct document_ids (offset stays 0).
+                sub_doc_id = document_id or (sub_batch[0].get("document_id") if len(sub_batch) == 1 else None)
+                sub_offset = chunk_offsets.get(sub_doc_id, 0) if sub_doc_id else 0
 
                 sub_results, sub_usage, sub_processed = await self._retain_batch_async_internal(
                     bank_id=bank_id,
@@ -2821,7 +2893,24 @@ class MemoryEngine(MemoryEngineInterface):
                     outbox_callback=outbox_callback if i == len(sub_batches) else None,
                     outbox_callback_factory=outbox_callback_factory if i == len(sub_batches) else None,
                     document_body_override=document_body_overrides[i - 1],
+                    chunk_index_offset=sub_offset,
                 )
+
+                # Advance the document's chunk_index cursor by the number of
+                # chunks this sub-batch produced (computed with the same chunk
+                # size the orchestrator uses), so the next sub-batch sharing the
+                # document continues the sequence.
+                if sub_doc_id:
+                    sub_chunk_count = sum(
+                        len(fact_extraction.chunk_text(item.get("content", "") or "", sub_chunk_size))
+                        for item in sub_batch
+                    )
+                    # retain_batch only prepends the existing body on the global
+                    # first sub-batch (is_first_batch == i == 1), so fold its chunk
+                    # count in only there.
+                    if i == 1:
+                        sub_chunk_count += append_prepend_chunks.get(sub_doc_id, 0)
+                    chunk_offsets[sub_doc_id] = sub_offset + sub_chunk_count
                 # sub_results aligns 1:1 with sub_batch items; map each
                 # back to its source input via origin_indices so callers
                 # iterating with ``zip(contents, results)`` still align.
@@ -2901,6 +2990,28 @@ class MemoryEngine(MemoryEngineInterface):
             return result, total_usage
         return result
 
+    async def _resolve_retain_chunk_size(
+        self,
+        bank_id: str,
+        request_context: "RequestContext",
+        strategy: str | None,
+    ) -> int:
+        """Resolve the effective ``retain_chunk_size`` for a bank.
+
+        Mirrors the bank-config + strategy resolution that
+        ``_retain_batch_async_internal`` applies before handing config to the
+        orchestrator, so chunk-count estimates used for per-document
+        chunk_index offsets match the chunk_index values the orchestrator
+        actually assigns.
+        """
+        from hindsight_api.config_resolver import apply_strategy
+
+        resolved_config = await self._config_resolver.resolve_full_config(bank_id, request_context)
+        effective_strategy = strategy or resolved_config.retain_default_strategy
+        if effective_strategy:
+            resolved_config = apply_strategy(resolved_config, effective_strategy)
+        return getattr(resolved_config, "retain_chunk_size", 3000)
+
     async def _retain_batch_async_internal(
         self,
         bank_id: str,
@@ -2915,6 +3026,7 @@ class MemoryEngine(MemoryEngineInterface):
         outbox_callback_factory: RetainOutboxCallbackFactory | None = None,
         strategy: str | None = None,
         document_body_override: str | None = None,
+        chunk_index_offset: int = 0,
     ) -> tuple[list[list[str]], "TokenUsage", int | None]:
         """
         Internal method for batch processing without chunking logic.
@@ -2979,6 +3091,7 @@ class MemoryEngine(MemoryEngineInterface):
                 outbox_callback_factory=outbox_callback_factory,
                 db_semaphore=self._put_semaphore,
                 document_body_override=document_body_override,
+                chunk_index_offset=chunk_index_offset,
             )
 
     def recall(
@@ -3090,6 +3203,12 @@ class MemoryEngine(MemoryEngineInterface):
         """
         # Authenticate tenant and set schema in context (for fq_table())
         await self._authenticate_tenant(request_context)
+
+        # Sanitize the query at ingress: a client may serialize a half-emoji as a
+        # lone UTF-16 surrogate, which crashes downstream logging, the embedder, and
+        # the cross-encoder tokenizer with an HTTP 500 (see issue #1875). Cleaning it
+        # here protects every sink that the query flows into.
+        query = sanitize_text(query) or ""
 
         # Default to all fact types if not specified
         if fact_type is None:
@@ -6160,6 +6279,167 @@ class MemoryEngine(MemoryEngineInterface):
 
         return result
 
+    # ==================== Audit log read methods ====================
+
+    async def list_audit_logs(
+        self,
+        bank_id: str,
+        *,
+        request_context: "RequestContext",
+        action: str | None = None,
+        transport: str | None = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> "AuditLogListResponse | None":
+        """List audit log entries for a bank, newest first.
+
+        Returns None when the bank does not exist (the HTTP layer maps this to a
+        404). Authentication and tenant-schema resolution happen inside
+        ``get_bank_profile`` before any query runs, so the SELECT below is scoped
+        to the authenticated tenant's schema.
+        """
+        from .audit import AuditLogEntry, AuditLogListResponse
+
+        if await self.get_bank_profile(bank_id, request_context=request_context, create_if_missing=False) is None:
+            return None
+
+        where_clauses = ["bank_id = $1"]
+        params: list[Any] = [bank_id]
+        idx = 2
+        for column, value in (("action", action), ("transport", transport)):
+            if value:
+                where_clauses.append(f"{column} = ${idx}")
+                params.append(value)
+                idx += 1
+        if start_date is not None:
+            where_clauses.append(f"started_at >= ${idx}")
+            params.append(start_date)
+            idx += 1
+        if end_date is not None:
+            where_clauses.append(f"started_at < ${idx}")
+            params.append(end_date)
+            idx += 1
+
+        where_sql = " AND ".join(where_clauses)
+        table = fq_table("audit_log")
+
+        backend = await self._get_backend()
+        async with acquire_with_retry(backend) as conn:
+            count_row = await conn.fetchrow(f"SELECT COUNT(*) AS total FROM {table} WHERE {where_sql}", *params)
+            total = count_row["total"] if count_row else 0
+
+            params.append(limit)
+            params.append(offset)
+            rows = await conn.fetch(
+                f"""
+                SELECT id, action, transport, bank_id, started_at, ended_at,
+                       request, response, metadata
+                FROM {table}
+                WHERE {where_sql}
+                ORDER BY started_at DESC
+                LIMIT ${idx} OFFSET ${idx + 1}
+                """,
+                *params,
+            )
+
+            items = []
+            for row in rows:
+                started = row["started_at"]
+                ended = row["ended_at"]
+                duration_ms = int((ended - started).total_seconds() * 1000) if started and ended else None
+                items.append(
+                    AuditLogEntry(
+                        id=str(row["id"]),
+                        action=row["action"],
+                        transport=row["transport"],
+                        bank_id=row["bank_id"],
+                        started_at=started.isoformat() if started else None,
+                        ended_at=ended.isoformat() if ended else None,
+                        duration_ms=duration_ms,
+                        request=conn.parse_json(row["request"]) if row["request"] is not None else None,
+                        response=conn.parse_json(row["response"]) if row["response"] is not None else None,
+                        metadata=conn.parse_json(row["metadata"]) if row["metadata"] is not None else {},
+                    )
+                )
+
+        return AuditLogListResponse(bank_id=bank_id, total=total, limit=limit, offset=offset, items=items)
+
+    async def audit_log_stats(
+        self,
+        bank_id: str,
+        *,
+        request_context: "RequestContext",
+        action: str | None = None,
+        period: str = "7d",
+    ) -> "AuditLogStatsResponse | None":
+        """Audit log counts grouped by day and action, for charting.
+
+        Returns None when the bank does not exist (mapped to 404 by the HTTP
+        layer). Auth/tenant resolution happen in ``get_bank_profile``.
+        """
+        from .audit import AuditLogStatsBucket, AuditLogStatsResponse
+
+        if await self.get_bank_profile(bank_id, request_context=request_context, create_if_missing=False) is None:
+            return None
+
+        now = datetime.now(timezone.utc)
+        trunc = "day"
+        if period == "1d":
+            start = now - timedelta(days=1)
+        elif period == "30d":
+            start = now - timedelta(days=30)
+        else:  # 7d default
+            start = now - timedelta(days=7)
+
+        where_clauses = ["bank_id = $1", "started_at >= $2"]
+        params: list[Any] = [bank_id, start]
+        idx = 3
+        if action:
+            where_clauses.append(f"action = ${idx}")
+            params.append(action)
+            idx += 1
+        where_sql = " AND ".join(where_clauses)
+        table = fq_table("audit_log")
+
+        backend = await self._get_backend()
+        async with acquire_with_retry(backend) as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT date_trunc('{trunc}', started_at) AS bucket,
+                       action,
+                       COUNT(*) AS count
+                FROM {table}
+                WHERE {where_sql}
+                GROUP BY bucket, action
+                ORDER BY bucket ASC
+                """,
+                *params,
+            )
+
+        # Aggregate per bucket: counts by action name (dynamic keys, so a plain
+        # dict here; materialized into typed models below).
+        actions_by_bucket: dict[str, dict[str, int]] = {}
+        order: list[str] = []
+        for row in rows:
+            key = row["bucket"].isoformat()
+            if key not in actions_by_bucket:
+                actions_by_bucket[key] = {}
+                order.append(key)
+            actions_by_bucket[key][row["action"]] = row["count"]
+
+        return AuditLogStatsResponse(
+            bank_id=bank_id,
+            period=period,
+            trunc=trunc,
+            start=start.isoformat(),
+            buckets=[
+                AuditLogStatsBucket(time=k, actions=actions_by_bucket[k], total=sum(actions_by_bucket[k].values()))
+                for k in order
+            ],
+        )
+
     # ==================== bank profile Methods ====================
 
     # Type-checker overloads: when create_if_missing is True (the default),
@@ -6472,6 +6752,11 @@ class MemoryEngine(MemoryEngineInterface):
                 - based_on: Empty dict (agent retrieves facts dynamically)
                 - structured_output: None (not yet supported for agentic reflect)
         """
+        # Sanitize at ingress so lone UTF-16 surrogates in the question/context cannot
+        # crash logging, recall's embedder, or the reflect LLM call (see issue #1875).
+        query = sanitize_text(query) or ""
+        context = sanitize_text(context)
+
         # Use cached LLM config
         if self._reflect_llm_config is None:
             raise ValueError("Memory LLM API key not set. Set HINDSIGHT_API_LLM_API_KEY environment variable.")
@@ -9781,31 +10066,6 @@ class MemoryEngine(MemoryEngineInterface):
 
         backend = await self._get_backend()
 
-        # Check for existing pending task if deduplication is enabled
-        # Note: We only check 'pending', not 'processing', because a processing task
-        # uses a watermark from when it started - new memories added after that point
-        # would need another consolidation run to be processed.
-        if dedupe_by_bank:
-            async with acquire_with_retry(backend) as conn:
-                existing = await conn.fetchrow(
-                    f"""
-                    SELECT operation_id FROM {fq_table("async_operations")}
-                    WHERE bank_id = $1 AND operation_type = $2 AND status = 'pending'
-                    LIMIT 1
-                    """,
-                    bank_id,
-                    operation_type,
-                )
-                if existing:
-                    logger.debug(
-                        f"{operation_type} task already pending for bank_id={bank_id}, "
-                        f"skipping duplicate (existing operation_id={existing['operation_id']})"
-                    )
-                    return {
-                        "operation_id": str(existing["operation_id"]),
-                        "deduplicated": True,
-                    }
-
         operation_id = uuid.uuid4()
 
         # Build full payload before INSERT so task_payload is included atomically.
@@ -9819,20 +10079,73 @@ class MemoryEngine(MemoryEngineInterface):
             **task_payload,
         }
 
-        # Insert operation record with task_payload in a single atomic statement
         async with acquire_with_retry(backend) as conn:
-            await conn.execute(
-                f"""
-                INSERT INTO {fq_table("async_operations")} (operation_id, bank_id, operation_type, result_metadata, status, task_payload)
-                VALUES ($1, $2, $3, $4, $5, $6::jsonb)
-                """,
-                operation_id,
-                bank_id,
-                operation_type,
-                json.dumps(result_metadata or {}, default=_json_default),
-                "pending",
-                json.dumps(full_payload, default=_json_default),
-            )
+            async with conn.transaction():
+                if dedupe_by_bank:
+                    # Serialize concurrent submits for this bank so the dedup
+                    # check-and-insert is atomic. A bare check-then-INSERT races
+                    # under READ COMMITTED: two /consolidate calls (or a manual
+                    # trigger racing a retain-driven submit / round-limit re-queue)
+                    # both see no pending row and both insert, leaking duplicate
+                    # pending ops that then pile up as retry_blocked and starve the
+                    # bank (issue #1842). Locking the bank row serializes submits for
+                    # this bank; it releases on commit below.
+                    #
+                    # FOR NO KEY UPDATE, not FOR UPDATE: async_operations has an FK to
+                    # banks, so every async-op insert for this bank (a scoped
+                    # consolidation, a batch-retain op, a webhook delivery, ...) takes a
+                    # FOR KEY SHARE lock on the bank row. FOR UPDATE conflicts with
+                    # FOR KEY SHARE and would block all of those during the submit;
+                    # FOR NO KEY UPDATE still conflicts with itself (so two submits
+                    # serialize) but not with FOR KEY SHARE (so those inserts proceed).
+                    # On Oracle this rewrites to FOR UPDATE, which there does not block
+                    # indexed-FK child inserts.
+                    await conn.execute(
+                        f"SELECT 1 FROM {fq_table('banks')} WHERE bank_id = $1 FOR NO KEY UPDATE",
+                        bank_id,
+                    )
+                    # Only check 'pending', not 'processing': a processing task uses a
+                    # watermark from when it started, so memories added after that need
+                    # a fresh run regardless.
+                    pending = await conn.fetch(
+                        f"""
+                        SELECT operation_id, task_payload FROM {fq_table("async_operations")}
+                        WHERE bank_id = $1 AND operation_type = $2 AND status = 'pending'
+                        """,
+                        bank_id,
+                        operation_type,
+                    )
+                    # Dedup only against an existing *unscoped* (full-bank) pending op.
+                    # A pending scoped consolidation covers only its tag subset, so it
+                    # must not swallow a full-bank sweep (#1842). The scope check is in
+                    # Python because the JSON predicate isn't portable — Oracle's
+                    # JSON_VALUE returns NULL for the array-valued observation_scopes.
+                    # (Scoped submits never reach here: they pass dedupe_by_bank=False.)
+                    for row in pending:
+                        row_payload = row["task_payload"]
+                        row_dict = json.loads(row_payload) if isinstance(row_payload, str) else (row_payload or {})
+                        if row_dict.get("observation_scopes") is None:
+                            logger.debug(
+                                f"{operation_type} task already pending for bank_id={bank_id}, "
+                                f"skipping duplicate (existing operation_id={row['operation_id']})"
+                            )
+                            return {
+                                "operation_id": str(row["operation_id"]),
+                                "deduplicated": True,
+                            }
+
+                await conn.execute(
+                    f"""
+                    INSERT INTO {fq_table("async_operations")} (operation_id, bank_id, operation_type, result_metadata, status, task_payload)
+                    VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+                    """,
+                    operation_id,
+                    bank_id,
+                    operation_type,
+                    json.dumps(result_metadata or {}, default=_json_default),
+                    "pending",
+                    json.dumps(full_payload, default=_json_default),
+                )
 
         # For SyncTaskBackend: executes the task immediately.
         # For BrokerTaskBackend: no-op (submit_task's UPDATE skips rows whose

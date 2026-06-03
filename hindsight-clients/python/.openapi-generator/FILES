@@ -37,6 +37,7 @@ hindsight_client_api/models/bank_template_import_response.py
 hindsight_client_api/models/bank_template_manifest.py
 hindsight_client_api/models/bank_template_mental_model.py
 hindsight_client_api/models/budget.py
+hindsight_client_api/models/build_info.py
 hindsight_client_api/models/cancel_operation_response.py
 hindsight_client_api/models/child_operation_status.py
 hindsight_client_api/models/chunk_data.py

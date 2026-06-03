@@ -1082,7 +1082,7 @@ async def test_version_endpoint_returns_correct_version(api_client):
     The version should match the __version__ defined in hindsight_api.__init__.py
     and should not be a hardcoded string.
     """
-    from hindsight_api import __version__
+    from hindsight_api import __distribution__, __upstream_repository__, __upstream_version__, __version__
 
     # Call the /version endpoint
     response = await api_client.get("/version")
@@ -1092,9 +1092,17 @@ async def test_version_endpoint_returns_correct_version(api_client):
     # Verify response structure
     assert "api_version" in result, "Response should include 'api_version' field"
     assert "features" in result, "Response should include 'features' field"
+    assert "build" in result, "Response should include 'build' field"
 
     # Verify the version matches the package version
     assert result["api_version"] == __version__, f"API version should be {__version__}, got {result['api_version']}"
+
+    # Verify JD fork build metadata
+    assert result["build"] == {
+        "distribution": __distribution__,
+        "upstream_repository": __upstream_repository__,
+        "upstream_version": __upstream_version__,
+    }
 
     # Verify features field structure
     features = result["features"]

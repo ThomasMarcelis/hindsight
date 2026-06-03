@@ -75,20 +75,47 @@ class CodexLLM(LLMInterface):
         # racing toward an expired token should produce one network refresh.
         self._auth_lock = asyncio.Lock()
 
-        # Load Codex OAuth credentials (keep these methods for test patching).
-        try:
-            access_token, account_id = self._load_codex_auth()
-            refresh_token = self._load_codex_refresh_token()
-            logger.info(f"Loaded Codex OAuth credentials for account: {account_id}")
-        except Exception as e:
-            raise RuntimeError(
-                f"Failed to load Codex OAuth credentials from ~/.codex/auth.json: {e}\n\n"
-                "To set up Codex authentication:\n"
-                "1. Install Codex CLI: npm install -g @openai/codex\n"
-                "2. Login: codex auth login\n"
-                "3. Verify: ls ~/.codex/auth.json\n\n"
-                "Or use a different provider (openai, anthropic, gemini) with API keys."
-            ) from e
+        # Use ChatGPT backend API endpoint. Codex auth is tied to
+        # chatgpt.com/backend-api, not the OpenAI-compatible base URL used by
+        # other providers. Deployments often set a global LLM_BASE_URL for an
+        # OpenAI-compatible proxy; ignore that inherited value unless the user
+        # explicitly provides a Codex backend URL.
+        supplied_base_url = (self.base_url or "").rstrip("/")
+        if not supplied_base_url or supplied_base_url.endswith("/v1"):
+            self.base_url = "https://chatgpt.com/backend-api"
+        else:
+            self.base_url = supplied_base_url
+
+        # JD/local deployments can route openai-codex through a local codex-lb
+        # /backend-api endpoint. In that mode codex-lb owns upstream account
+        # selection/refresh; this client must not refresh ~/.codex/auth.json
+        # locally, or stale single-use refresh tokens can throw
+        # refresh_token_reused before the request ever reaches codex-lb.
+        self._codex_proxy_mode = bool(self.base_url and "chatgpt.com/backend-api" not in self.base_url)
+
+        if self._codex_proxy_mode:
+            access_token = self.api_key or "codex-proxy"
+            account_id = "codex-proxy"
+            refresh_token = None
+            logger.info(
+                "Using Codex backend proxy: base_url=%s; local ~/.codex OAuth refresh disabled",
+                self.base_url,
+            )
+        else:
+            # Load Codex OAuth credentials (keep these methods for test patching).
+            try:
+                access_token, account_id = self._load_codex_auth()
+                refresh_token = self._load_codex_refresh_token()
+                logger.info(f"Loaded Codex OAuth credentials for account: {account_id}")
+            except Exception as e:
+                raise RuntimeError(
+                    f"Failed to load Codex OAuth credentials from ~/.codex/auth.json: {e}\n\n"
+                    "To set up Codex authentication:\n"
+                    "1. Install Codex CLI: npm install -g @openai/codex\n"
+                    "2. Login: codex auth login\n"
+                    "3. Verify: ls ~/.codex/auth.json\n\n"
+                    "Or use a different provider (openai, anthropic, gemini) with API keys."
+                ) from e
 
         self._auth_manager = CodexAuthManager(
             access_token=access_token,
@@ -96,16 +123,6 @@ class CodexLLM(LLMInterface):
             refresh_token=refresh_token,
             auth_file=Path.home() / ".codex" / "auth.json",
         )
-
-        # Use ChatGPT backend API endpoint. Codex auth is tied to
-        # chatgpt.com/backend-api, not the OpenAI-compatible base URL used by
-        # other providers. Deployments often set a global LLM_BASE_URL for an
-        # OpenAI-compatible proxy; ignore that inherited value unless the user
-        # explicitly provides a Codex backend URL.
-        if not self.base_url or self.base_url.rstrip("/").endswith("/v1"):
-            self.base_url = "https://chatgpt.com/backend-api"
-        else:
-            self.base_url = self.base_url.rstrip("/")
 
         # Normalize model name (strip openai/ prefix if present)
         if self.model.startswith("openai/"):
@@ -248,6 +265,8 @@ class CodexLLM(LLMInterface):
         Called at the top of every API-bound method. Cheap when the token is
         fresh (just decodes the JWT exp claim and returns).
         """
+        if self._codex_proxy_mode:
+            return
         if self._auth_manager._token_is_stale():
             try:
                 await self._refresh_oauth_tokens(reason="proactive (token near expiry)")
@@ -271,6 +290,14 @@ class CodexLLM(LLMInterface):
             "xhigh": "detailed",
         }
         return mapping.get(effort.lower(), "auto")
+
+    def _reasoning_payload(self, reasoning_summary: str) -> dict[str, str]:
+        """Build the Codex Responses API reasoning payload."""
+        reasoning = {"summary": reasoning_summary}
+        effort = self.reasoning_effort.lower()
+        if effort in {"low", "medium", "high", "xhigh"}:
+            reasoning["effort"] = effort
+        return reasoning
 
     def _normalize_tool_choice(self, tool_choice: str | dict[str, Any]) -> str | dict[str, Any]:
         """Normalize forced function tool choice for the Codex Responses API.
@@ -381,7 +408,7 @@ class CodexLLM(LLMInterface):
             "tools": [],
             "tool_choice": "auto",
             "parallel_tool_calls": True,
-            "reasoning": {"summary": reasoning_summary},
+            "reasoning": self._reasoning_payload(reasoning_summary),
             "store": False,  # Codex uses stateless mode
             "stream": True,  # SSE streaming
             "include": ["reasoning.encrypted_content"],
@@ -500,7 +527,7 @@ class CodexLLM(LLMInterface):
                 # the JWT exp claim is unparseable and we never knew it was
                 # stale. Reactive refresh is the safety net.
                 if status_code in (401, 403):
-                    if not attempted_refresh_after_auth_error:
+                    if not self._codex_proxy_mode and not attempted_refresh_after_auth_error:
                         attempted_refresh_after_auth_error = True
                         try:
                             await self._refresh_oauth_tokens(
@@ -712,7 +739,7 @@ class CodexLLM(LLMInterface):
             "tools": codex_tools,
             "tool_choice": self._normalize_tool_choice(tool_choice),
             "parallel_tool_calls": True,
-            "reasoning": {"summary": reasoning_summary},
+            "reasoning": self._reasoning_payload(reasoning_summary),
             "store": False,
             "stream": True,
             "include": ["reasoning.encrypted_content"],
@@ -741,7 +768,11 @@ class CodexLLM(LLMInterface):
         try:
             response = await self._client.post(url, json=payload, headers=headers, timeout=120.0)
 
-            if response.status_code in (401, 403) and not attempted_refresh_after_auth_error:
+            if (
+                response.status_code in (401, 403)
+                and not self._codex_proxy_mode
+                and not attempted_refresh_after_auth_error
+            ):
                 attempted_refresh_after_auth_error = True
                 try:
                     await self._refresh_oauth_tokens(

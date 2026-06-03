@@ -10,7 +10,7 @@
       "name": "Apache 2.0",
       "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
     },
-    "version": "0.7.1"
+    "version": "0.7.2"
   },
   "paths": {
     "/health": {
@@ -6349,6 +6349,33 @@
         "title": "Budget",
         "description": "Budget levels for recall/reflect operations."
       },
+      "BuildInfo": {
+        "properties": {
+          "distribution": {
+            "type": "string",
+            "title": "Distribution",
+            "description": "Distribution name for this deployment"
+          },
+          "upstream_repository": {
+            "type": "string",
+            "title": "Upstream Repository",
+            "description": "Upstream repository this build is based on"
+          },
+          "upstream_version": {
+            "type": "string",
+            "title": "Upstream Version",
+            "description": "Upstream release version this build is based on"
+          }
+        },
+        "type": "object",
+        "required": [
+          "distribution",
+          "upstream_repository",
+          "upstream_version"
+        ],
+        "title": "BuildInfo",
+        "description": "Distribution metadata for this deployed build."
+      },
       "CancelOperationResponse": {
         "properties": {
           "success": {
@@ -10827,6 +10854,17 @@
           "features": {
             "$ref": "#/components/schemas/FeaturesInfo",
             "description": "Enabled feature flags"
+          },
+          "build": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BuildInfo"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Distribution build metadata"
           }
         },
         "type": "object",
@@ -10838,6 +10876,11 @@
         "description": "Response model for the version/info endpoint.",
         "example": {
           "api_version": "0.4.0",
+          "build": {
+            "distribution": "jd-hindsight",
+            "upstream_repository": "vectorize-io/hindsight",
+            "upstream_version": "0.4.0"
+          },
           "features": {
             "bank_config_api": false,
             "file_upload_api": true,

@@ -170,7 +170,19 @@ ENV_RETAIN_LLM_MAX_RETRIES = "HINDSIGHT_API_RETAIN_LLM_MAX_RETRIES"
 ENV_RETAIN_LLM_INITIAL_BACKOFF = "HINDSIGHT_API_RETAIN_LLM_INITIAL_BACKOFF"
 ENV_RETAIN_LLM_MAX_BACKOFF = "HINDSIGHT_API_RETAIN_LLM_MAX_BACKOFF"
 ENV_RETAIN_LLM_TIMEOUT = "HINDSIGHT_API_RETAIN_LLM_TIMEOUT"
+ENV_RETAIN_LLM_REASONING_EFFORT = "HINDSIGHT_API_RETAIN_LLM_REASONING_EFFORT"
 ENV_RETAIN_LLM_LITELLMROUTER_CONFIG = "HINDSIGHT_API_RETAIN_LLM_LITELLMROUTER_CONFIG"
+
+# Fireworks AI batch inference. Fireworks' batch API is a proprietary
+# account-scoped dataset/job REST API on a control-plane host, distinct from the
+# OpenAI-compatible inference host. account_id is REQUIRED for batch retain
+# (the control-plane endpoints are /v1/accounts/{account_id}/...). Static,
+# server-level config — it pairs with the Fireworks API key.
+ENV_FIREWORKS_ACCOUNT_ID = "HINDSIGHT_API_FIREWORKS_ACCOUNT_ID"
+ENV_FIREWORKS_BATCH_BASE_URL = "HINDSIGHT_API_FIREWORKS_BATCH_BASE_URL"
+ENV_FIREWORKS_BATCH_MAX_WAIT_SECONDS = "HINDSIGHT_API_FIREWORKS_BATCH_MAX_WAIT_SECONDS"
+DEFAULT_FIREWORKS_BATCH_BASE_URL = "https://api.fireworks.ai"
+DEFAULT_FIREWORKS_BATCH_MAX_WAIT_SECONDS = 86_400  # 24h — Fireworks' max job timeout
 
 ENV_REFLECT_LLM_PROVIDER = "HINDSIGHT_API_REFLECT_LLM_PROVIDER"
 ENV_REFLECT_LLM_API_KEY = "HINDSIGHT_API_REFLECT_LLM_API_KEY"
@@ -181,6 +193,7 @@ ENV_REFLECT_LLM_MAX_RETRIES = "HINDSIGHT_API_REFLECT_LLM_MAX_RETRIES"
 ENV_REFLECT_LLM_INITIAL_BACKOFF = "HINDSIGHT_API_REFLECT_LLM_INITIAL_BACKOFF"
 ENV_REFLECT_LLM_MAX_BACKOFF = "HINDSIGHT_API_REFLECT_LLM_MAX_BACKOFF"
 ENV_REFLECT_LLM_TIMEOUT = "HINDSIGHT_API_REFLECT_LLM_TIMEOUT"
+ENV_REFLECT_LLM_REASONING_EFFORT = "HINDSIGHT_API_REFLECT_LLM_REASONING_EFFORT"
 ENV_REFLECT_LLM_LITELLMROUTER_CONFIG = "HINDSIGHT_API_REFLECT_LLM_LITELLMROUTER_CONFIG"
 
 ENV_CONSOLIDATION_LLM_PROVIDER = "HINDSIGHT_API_CONSOLIDATION_LLM_PROVIDER"
@@ -192,12 +205,20 @@ ENV_CONSOLIDATION_LLM_MAX_RETRIES = "HINDSIGHT_API_CONSOLIDATION_LLM_MAX_RETRIES
 ENV_CONSOLIDATION_LLM_INITIAL_BACKOFF = "HINDSIGHT_API_CONSOLIDATION_LLM_INITIAL_BACKOFF"
 ENV_CONSOLIDATION_LLM_MAX_BACKOFF = "HINDSIGHT_API_CONSOLIDATION_LLM_MAX_BACKOFF"
 ENV_CONSOLIDATION_LLM_TIMEOUT = "HINDSIGHT_API_CONSOLIDATION_LLM_TIMEOUT"
+ENV_CONSOLIDATION_LLM_REASONING_EFFORT = "HINDSIGHT_API_CONSOLIDATION_LLM_REASONING_EFFORT"
 ENV_CONSOLIDATION_LLM_LITELLMROUTER_CONFIG = "HINDSIGHT_API_CONSOLIDATION_LLM_LITELLMROUTER_CONFIG"
 
 ENV_EMBEDDINGS_PROVIDER = "HINDSIGHT_API_EMBEDDINGS_PROVIDER"
 ENV_EMBEDDINGS_LOCAL_MODEL = "HINDSIGHT_API_EMBEDDINGS_LOCAL_MODEL"
 ENV_EMBEDDINGS_LOCAL_FORCE_CPU = "HINDSIGHT_API_EMBEDDINGS_LOCAL_FORCE_CPU"
 ENV_EMBEDDINGS_LOCAL_TRUST_REMOTE_CODE = "HINDSIGHT_API_EMBEDDINGS_LOCAL_TRUST_REMOTE_CODE"
+ENV_EMBEDDINGS_LOCAL_QUERY_PROMPT_NAME = "HINDSIGHT_API_EMBEDDINGS_LOCAL_QUERY_PROMPT_NAME"
+ENV_EMBEDDINGS_LOCAL_QUERY_PROMPT = "HINDSIGHT_API_EMBEDDINGS_LOCAL_QUERY_PROMPT"
+ENV_EMBEDDINGS_LOCAL_DOCUMENT_PROMPT_NAME = "HINDSIGHT_API_EMBEDDINGS_LOCAL_DOCUMENT_PROMPT_NAME"
+ENV_EMBEDDINGS_LOCAL_DOCUMENT_PROMPT = "HINDSIGHT_API_EMBEDDINGS_LOCAL_DOCUMENT_PROMPT"
+ENV_EMBEDDINGS_LOCAL_TRUNCATE_DIM = "HINDSIGHT_API_EMBEDDINGS_LOCAL_TRUNCATE_DIM"
+ENV_EMBEDDINGS_LOCAL_NORMALIZE = "HINDSIGHT_API_EMBEDDINGS_LOCAL_NORMALIZE"
+ENV_EMBEDDINGS_LOCAL_BATCH_SIZE = "HINDSIGHT_API_EMBEDDINGS_LOCAL_BATCH_SIZE"
 ENV_EMBEDDINGS_TEI_URL = "HINDSIGHT_API_EMBEDDINGS_TEI_URL"
 ENV_EMBEDDINGS_OPENAI_API_KEY = "HINDSIGHT_API_EMBEDDINGS_OPENAI_API_KEY"
 ENV_EMBEDDINGS_OPENAI_MODEL = "HINDSIGHT_API_EMBEDDINGS_OPENAI_MODEL"
@@ -521,6 +542,7 @@ PROVIDER_DEFAULT_MODELS = {
     "bedrock": "us.amazon.nova-2-lite-v1:0",
     "volcano": "doubao-pro-32k",
     "openrouter": "qwen/qwen3.5-9b",
+    "fireworks": "accounts/fireworks/models/llama-v3p1-8b-instruct",
 }
 DEFAULT_LLM_MODEL = "gpt-4o-mini"  # Fallback if provider not in table
 # Built-in llama.cpp defaults
@@ -549,6 +571,13 @@ DEFAULT_EMBEDDINGS_PROVIDER = "local"
 DEFAULT_EMBEDDINGS_LOCAL_MODEL = "BAAI/bge-small-en-v1.5"
 DEFAULT_EMBEDDINGS_LOCAL_FORCE_CPU = False  # Force CPU mode for local embeddings
 DEFAULT_EMBEDDINGS_LOCAL_TRUST_REMOTE_CODE = False  # Security: disabled by default, required for some models
+DEFAULT_EMBEDDINGS_LOCAL_QUERY_PROMPT_NAME = None
+DEFAULT_EMBEDDINGS_LOCAL_QUERY_PROMPT = None
+DEFAULT_EMBEDDINGS_LOCAL_DOCUMENT_PROMPT_NAME = None
+DEFAULT_EMBEDDINGS_LOCAL_DOCUMENT_PROMPT = None
+DEFAULT_EMBEDDINGS_LOCAL_TRUNCATE_DIM = None
+DEFAULT_EMBEDDINGS_LOCAL_NORMALIZE = False
+DEFAULT_EMBEDDINGS_LOCAL_BATCH_SIZE = 32
 DEFAULT_EMBEDDINGS_OPENAI_MODEL = "text-embedding-3-small"
 DEFAULT_EMBEDDINGS_OPENAI_BATCH_SIZE = 100
 DEFAULT_EMBEDDINGS_GEMINI_MODEL = "gemini-embedding-001"
@@ -1073,7 +1102,13 @@ class HindsightConfig:
     retain_llm_initial_backoff: float | None
     retain_llm_max_backoff: float | None
     retain_llm_timeout: float | None
+    retain_llm_reasoning_effort: str | None
     retain_llm_litellmrouter_config: dict | None
+
+    # Fireworks AI batch inference (static, server-level)
+    fireworks_account_id: str | None
+    fireworks_batch_base_url: str
+    fireworks_batch_max_wait_seconds: int
 
     reflect_llm_provider: str | None
     reflect_llm_api_key: str | None
@@ -1084,6 +1119,7 @@ class HindsightConfig:
     reflect_llm_initial_backoff: float | None
     reflect_llm_max_backoff: float | None
     reflect_llm_timeout: float | None
+    reflect_llm_reasoning_effort: str | None
     reflect_llm_litellmrouter_config: dict | None
 
     consolidation_llm_provider: str | None
@@ -1095,6 +1131,7 @@ class HindsightConfig:
     consolidation_llm_initial_backoff: float | None
     consolidation_llm_max_backoff: float | None
     consolidation_llm_timeout: float | None
+    consolidation_llm_reasoning_effort: str | None
     consolidation_llm_litellmrouter_config: dict | None
 
     # Embeddings
@@ -1342,6 +1379,13 @@ class HindsightConfig:
     # Keep at the end of the dataclass; Python forbids non-default fields after default fields.
     embeddings_openai_batch_size: int = DEFAULT_EMBEDDINGS_OPENAI_BATCH_SIZE
     embeddings_openai_dimensions: int | None = None
+    embeddings_local_query_prompt_name: str | None = DEFAULT_EMBEDDINGS_LOCAL_QUERY_PROMPT_NAME
+    embeddings_local_query_prompt: str | None = DEFAULT_EMBEDDINGS_LOCAL_QUERY_PROMPT
+    embeddings_local_document_prompt_name: str | None = DEFAULT_EMBEDDINGS_LOCAL_DOCUMENT_PROMPT_NAME
+    embeddings_local_document_prompt: str | None = DEFAULT_EMBEDDINGS_LOCAL_DOCUMENT_PROMPT
+    embeddings_local_truncate_dim: int | None = DEFAULT_EMBEDDINGS_LOCAL_TRUNCATE_DIM
+    embeddings_local_normalize: bool = DEFAULT_EMBEDDINGS_LOCAL_NORMALIZE
+    embeddings_local_batch_size: int = DEFAULT_EMBEDDINGS_LOCAL_BATCH_SIZE
     embeddings_zeroentropy_api_key: str | None = None
     embeddings_zeroentropy_model: str = DEFAULT_EMBEDDINGS_ZEROENTROPY_MODEL
     embeddings_zeroentropy_base_url: str = DEFAULT_ZEROENTROPY_BASE_URL
@@ -1658,6 +1702,11 @@ class HindsightConfig:
                 else None
             ),
             retain_llm_base_url=os.getenv(ENV_RETAIN_LLM_BASE_URL) or None,
+            fireworks_account_id=os.getenv(ENV_FIREWORKS_ACCOUNT_ID) or None,
+            fireworks_batch_base_url=os.getenv(ENV_FIREWORKS_BATCH_BASE_URL) or DEFAULT_FIREWORKS_BATCH_BASE_URL,
+            fireworks_batch_max_wait_seconds=int(
+                os.getenv(ENV_FIREWORKS_BATCH_MAX_WAIT_SECONDS, str(DEFAULT_FIREWORKS_BATCH_MAX_WAIT_SECONDS))
+            ),
             retain_llm_max_concurrent=int(os.getenv(ENV_RETAIN_LLM_MAX_CONCURRENT))
             if os.getenv(ENV_RETAIN_LLM_MAX_CONCURRENT)
             else None,
@@ -1671,6 +1720,7 @@ class HindsightConfig:
             if os.getenv(ENV_RETAIN_LLM_MAX_BACKOFF)
             else None,
             retain_llm_timeout=float(os.getenv(ENV_RETAIN_LLM_TIMEOUT)) if os.getenv(ENV_RETAIN_LLM_TIMEOUT) else None,
+            retain_llm_reasoning_effort=os.getenv(ENV_RETAIN_LLM_REASONING_EFFORT) or None,
             retain_llm_litellmrouter_config=_parse_llm_router_config(ENV_RETAIN_LLM_LITELLMROUTER_CONFIG),
             reflect_llm_provider=os.getenv(ENV_REFLECT_LLM_PROVIDER) or None,
             reflect_llm_api_key=os.getenv(ENV_REFLECT_LLM_API_KEY) or None,
@@ -1696,6 +1746,7 @@ class HindsightConfig:
             reflect_llm_timeout=float(os.getenv(ENV_REFLECT_LLM_TIMEOUT))
             if os.getenv(ENV_REFLECT_LLM_TIMEOUT)
             else None,
+            reflect_llm_reasoning_effort=os.getenv(ENV_REFLECT_LLM_REASONING_EFFORT) or None,
             reflect_llm_litellmrouter_config=_parse_llm_router_config(ENV_REFLECT_LLM_LITELLMROUTER_CONFIG),
             consolidation_llm_provider=os.getenv(ENV_CONSOLIDATION_LLM_PROVIDER) or None,
             consolidation_llm_api_key=os.getenv(ENV_CONSOLIDATION_LLM_API_KEY) or None,
@@ -1721,6 +1772,7 @@ class HindsightConfig:
             consolidation_llm_timeout=float(os.getenv(ENV_CONSOLIDATION_LLM_TIMEOUT))
             if os.getenv(ENV_CONSOLIDATION_LLM_TIMEOUT)
             else None,
+            consolidation_llm_reasoning_effort=os.getenv(ENV_CONSOLIDATION_LLM_REASONING_EFFORT) or None,
             consolidation_llm_litellmrouter_config=_parse_llm_router_config(ENV_CONSOLIDATION_LLM_LITELLMROUTER_CONFIG),
             # Embeddings
             embeddings_provider=os.getenv(ENV_EMBEDDINGS_PROVIDER, DEFAULT_EMBEDDINGS_PROVIDER),
@@ -1733,6 +1785,23 @@ class HindsightConfig:
                 ENV_EMBEDDINGS_LOCAL_TRUST_REMOTE_CODE, str(DEFAULT_EMBEDDINGS_LOCAL_TRUST_REMOTE_CODE)
             ).lower()
             in ("true", "1"),
+            embeddings_local_query_prompt_name=os.getenv(ENV_EMBEDDINGS_LOCAL_QUERY_PROMPT_NAME) or None,
+            embeddings_local_query_prompt=os.getenv(ENV_EMBEDDINGS_LOCAL_QUERY_PROMPT) or None,
+            embeddings_local_document_prompt_name=os.getenv(ENV_EMBEDDINGS_LOCAL_DOCUMENT_PROMPT_NAME) or None,
+            embeddings_local_document_prompt=os.getenv(ENV_EMBEDDINGS_LOCAL_DOCUMENT_PROMPT) or None,
+            embeddings_local_truncate_dim=_parse_optional_positive_int(
+                ENV_EMBEDDINGS_LOCAL_TRUNCATE_DIM,
+                os.getenv(ENV_EMBEDDINGS_LOCAL_TRUNCATE_DIM),
+            ),
+            embeddings_local_normalize=os.getenv(
+                ENV_EMBEDDINGS_LOCAL_NORMALIZE, str(DEFAULT_EMBEDDINGS_LOCAL_NORMALIZE)
+            ).lower()
+            in ("true", "1"),
+            embeddings_local_batch_size=_parse_positive_int(
+                ENV_EMBEDDINGS_LOCAL_BATCH_SIZE,
+                os.getenv(ENV_EMBEDDINGS_LOCAL_BATCH_SIZE),
+                DEFAULT_EMBEDDINGS_LOCAL_BATCH_SIZE,
+            ),
             embeddings_tei_url=os.getenv(ENV_EMBEDDINGS_TEI_URL),
             embeddings_openai_base_url=os.getenv(ENV_EMBEDDINGS_OPENAI_BASE_URL) or None,
             embeddings_openai_batch_size=_parse_positive_int(

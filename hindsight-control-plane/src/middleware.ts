@@ -6,6 +6,7 @@ import createIntlMiddleware from "next-intl/middleware";
 import { ACCESS_KEY_COOKIE, verifySessionToken } from "@/lib/auth/session";
 import { stripBasePath, withBasePath } from "@/lib/base-path";
 import { routing } from "@/i18n/routing";
+import { defaultLocale } from "@/i18n/config";
 
 // Routes that don't require authentication
 const PUBLIC_PATTERNS = [
@@ -33,10 +34,47 @@ function stripLocalePrefix(pathname: string): string {
   return pathname;
 }
 
+function hasLocalePrefix(pathname: string): boolean {
+  const segments = pathname.split("/");
+  return segments.length >= 2 && (routing.locales as readonly string[]).includes(segments[1]);
+}
+
+function isLoginPath(pathname: string): boolean {
+  const canonicalPath = stripLocalePrefix(pathname);
+  return canonicalPath === "/login" || canonicalPath.startsWith("/login/");
+}
+
+function routeLoginWithoutIntlRedirectLoop(
+  request: NextRequest,
+  appPathname: string
+): NextResponse | null {
+  if (!isLoginPath(appPathname)) {
+    return null;
+  }
+
+  // In standalone builds, next-intl's default-locale canonicalization can
+  // produce a /login ⇄ /en/login redirect loop. Login is public and simple:
+  // if the URL is already locale-prefixed, serve it directly; otherwise rewrite
+  // internally to the default-locale route while preserving the public /login URL.
+  if (hasLocalePrefix(appPathname)) {
+    return NextResponse.next();
+  }
+
+  const canonicalPath = stripLocalePrefix(appPathname);
+  const rewriteUrl = request.nextUrl.clone();
+  rewriteUrl.pathname = withBasePath(`/${defaultLocale}${canonicalPath}`);
+  return NextResponse.rewrite(rewriteUrl);
+}
+
 export async function middleware(request: NextRequest) {
   const accessKey = process.env.HINDSIGHT_CP_ACCESS_KEY;
   const { pathname } = request.nextUrl;
   const appPathname = stripBasePath(pathname);
+
+  const loginResponse = routeLoginWithoutIntlRedirectLoop(request, appPathname);
+  if (loginResponse) {
+    return loginResponse;
+  }
 
   // API routes are not locale-prefixed — handle auth directly without i18n routing.
   if (appPathname.startsWith("/api/")) {
