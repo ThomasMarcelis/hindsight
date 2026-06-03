@@ -806,6 +806,32 @@ export type BodyFileRetain = {
 export type Budget = "low" | "mid" | "high";
 
 /**
+ * BuildInfo
+ *
+ * Distribution metadata for this deployed build.
+ */
+export type BuildInfo = {
+  /**
+   * Distribution
+   *
+   * Distribution name for this deployment
+   */
+  distribution: string;
+  /**
+   * Upstream Repository
+   *
+   * Upstream repository this build is based on
+   */
+  upstream_repository: string;
+  /**
+   * Upstream Version
+   *
+   * Upstream release version this build is based on
+   */
+  upstream_version: string;
+};
+
+/**
  * CancelOperationResponse
  *
  * Response model for cancel operation endpoint.
@@ -3263,6 +3289,10 @@ export type VersionResponse = {
    * Enabled feature flags
    */
   features: FeaturesInfo;
+  /**
+   * Distribution build metadata
+   */
+  build?: BuildInfo | null;
 };
 
 /**

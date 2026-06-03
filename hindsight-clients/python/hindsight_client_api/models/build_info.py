@@ -18,20 +18,18 @@ import re  # noqa: F401
 import json
 
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
-from typing import Any, ClassVar, Dict, List, Optional
-from hindsight_client_api.models.build_info import BuildInfo
-from hindsight_client_api.models.features_info import FeaturesInfo
+from typing import Any, ClassVar, Dict, List
 from typing import Optional, Set
 from typing_extensions import Self
 
-class VersionResponse(BaseModel):
+class BuildInfo(BaseModel):
     """
-    Response model for the version/info endpoint.
+    Distribution metadata for this deployed build.
     """ # noqa: E501
-    api_version: StrictStr = Field(description="API version string")
-    features: FeaturesInfo = Field(description="Enabled feature flags")
-    build: Optional[BuildInfo] = None
-    __properties: ClassVar[List[str]] = ["api_version", "features", "build"]
+    distribution: StrictStr = Field(description="Distribution name for this deployment")
+    upstream_repository: StrictStr = Field(description="Upstream repository this build is based on")
+    upstream_version: StrictStr = Field(description="Upstream release version this build is based on")
+    __properties: ClassVar[List[str]] = ["distribution", "upstream_repository", "upstream_version"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -51,7 +49,7 @@ class VersionResponse(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of VersionResponse from a JSON string"""
+        """Create an instance of BuildInfo from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -72,22 +70,11 @@ class VersionResponse(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # override the default output from pydantic by calling `to_dict()` of features
-        if self.features:
-            _dict['features'] = self.features.to_dict()
-        # override the default output from pydantic by calling `to_dict()` of build
-        if self.build:
-            _dict['build'] = self.build.to_dict()
-        # set to None if build (nullable) is None
-        # and model_fields_set contains the field
-        if self.build is None and "build" in self.model_fields_set:
-            _dict['build'] = None
-
         return _dict
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of VersionResponse from a dict"""
+        """Create an instance of BuildInfo from a dict"""
         if obj is None:
             return None
 
@@ -95,9 +82,9 @@ class VersionResponse(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "api_version": obj.get("api_version"),
-            "features": FeaturesInfo.from_dict(obj["features"]) if obj.get("features") is not None else None,
-            "build": BuildInfo.from_dict(obj["build"]) if obj.get("build") is not None else None
+            "distribution": obj.get("distribution"),
+            "upstream_repository": obj.get("upstream_repository"),
+            "upstream_version": obj.get("upstream_version")
         })
         return _obj
 

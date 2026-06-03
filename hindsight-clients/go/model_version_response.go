@@ -25,6 +25,7 @@ type VersionResponse struct {
 	ApiVersion string `json:"api_version"`
 	// Enabled feature flags
 	Features FeaturesInfo `json:"features"`
+	Build NullableBuildInfo `json:"build,omitempty"`
 }
 
 type _VersionResponse VersionResponse
@@ -96,6 +97,48 @@ func (o *VersionResponse) SetFeatures(v FeaturesInfo) {
 	o.Features = v
 }
 
+// GetBuild returns the Build field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *VersionResponse) GetBuild() BuildInfo {
+	if o == nil || IsNil(o.Build.Get()) {
+		var ret BuildInfo
+		return ret
+	}
+	return *o.Build.Get()
+}
+
+// GetBuildOk returns a tuple with the Build field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+// NOTE: If the value is an explicit nil, `nil, true` will be returned
+func (o *VersionResponse) GetBuildOk() (*BuildInfo, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return o.Build.Get(), o.Build.IsSet()
+}
+
+// HasBuild returns a boolean if a field has been set.
+func (o *VersionResponse) HasBuild() bool {
+	if o != nil && o.Build.IsSet() {
+		return true
+	}
+
+	return false
+}
+
+// SetBuild gets a reference to the given NullableBuildInfo and assigns it to the Build field.
+func (o *VersionResponse) SetBuild(v BuildInfo) {
+	o.Build.Set(&v)
+}
+// SetBuildNil sets the value for Build to be an explicit nil
+func (o *VersionResponse) SetBuildNil() {
+	o.Build.Set(nil)
+}
+
+// UnsetBuild ensures that no value is present for Build, not even an explicit nil
+func (o *VersionResponse) UnsetBuild() {
+	o.Build.Unset()
+}
+
 func (o VersionResponse) MarshalJSON() ([]byte, error) {
 	toSerialize,err := o.ToMap()
 	if err != nil {
@@ -108,6 +151,9 @@ func (o VersionResponse) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["api_version"] = o.ApiVersion
 	toSerialize["features"] = o.Features
+	if o.Build.IsSet() {
+		toSerialize["build"] = o.Build.Get()
+	}
 	return toSerialize, nil
 }
 

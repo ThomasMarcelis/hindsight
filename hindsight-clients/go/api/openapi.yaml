@@ -4229,6 +4229,26 @@ components:
       - high
       title: Budget
       type: string
+    BuildInfo:
+      description: Distribution metadata for this deployed build.
+      properties:
+        distribution:
+          description: Distribution name for this deployment
+          title: Distribution
+          type: string
+        upstream_repository:
+          description: Upstream repository this build is based on
+          title: Upstream Repository
+          type: string
+        upstream_version:
+          description: Upstream release version this build is based on
+          title: Upstream Version
+          type: string
+      required:
+      - distribution
+      - upstream_repository
+      - upstream_version
+      title: BuildInfo
     CancelOperationResponse:
       description: Response model for cancel operation endpoint.
       example:
@@ -6827,6 +6847,10 @@ components:
       description: Response model for the version/info endpoint.
       example:
         api_version: 0.4.0
+        build:
+          distribution: jd-hindsight
+          upstream_repository: vectorize-io/hindsight
+          upstream_version: 0.4.0
         features:
           bank_config_api: false
           file_upload_api: true
@@ -6840,6 +6864,8 @@ components:
           type: string
         features:
           $ref: '#/components/schemas/FeaturesInfo'
+        build:
+          $ref: '#/components/schemas/BuildInfo'
       required:
       - api_version
       - features
