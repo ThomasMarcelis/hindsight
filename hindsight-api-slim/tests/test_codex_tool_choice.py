@@ -48,6 +48,36 @@ def build_llm(reasoning_effort: str = "low") -> CodexLLM:
 
 
 @pytest.mark.asyncio
+async def test_codex_proxy_mode_skips_local_oauth_load_and_refresh():
+    with (
+        patch.object(CodexLLM, "_load_codex_auth", side_effect=AssertionError("local OAuth should not be loaded")),
+        patch.object(
+            CodexLLM,
+            "_load_codex_refresh_token",
+            side_effect=AssertionError("local OAuth refresh token should not be loaded"),
+        ),
+    ):
+        llm = CodexLLM(
+            provider="openai-codex",
+            api_key="proxy-token",
+            base_url="http://127.0.0.1:8787/backend-api",
+            model="gpt-5.4-mini",
+            reasoning_effort="low",
+        )
+
+    assert llm.base_url == "http://127.0.0.1:8787/backend-api"
+    assert llm._codex_proxy_mode is True
+    assert llm.access_token == "proxy-token"
+    assert llm.account_id == "codex-proxy"
+    assert llm.refresh_token is None
+
+    with patch.object(llm, "_refresh_oauth_tokens", new_callable=AsyncMock) as refresh:
+        await llm._ensure_fresh_token()
+
+    refresh.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_codex_normalizes_legacy_named_tool_choice_shape():
     llm = build_llm()
     response = MagicMock()
